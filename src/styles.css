@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+
+/* ------------------------------------------------------------------
+   Tokeny. OKLCH, neutralne odcienie podbarwione w stronę zieleni marki.
+   ------------------------------------------------------------------ */
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+
+  --color-bg: oklch(0.975 0.005 158);
+  --color-surface: oklch(1 0 0);
+  --color-sunken: oklch(0.957 0.007 158);
+  --color-line: oklch(0.905 0.009 158);
+  --color-line-strong: oklch(0.83 0.012 158);
+
+  --color-ink: oklch(0.225 0.022 162);
+  --color-ink-2: oklch(0.41 0.02 162);
+  --color-ink-3: oklch(0.52 0.016 162);
+
+  --color-green: oklch(0.5 0.118 156);
+  --color-green-hover: oklch(0.44 0.108 156);
+  --color-green-ink: oklch(0.38 0.092 156);
+  --color-green-soft: oklch(0.948 0.036 156);
+  --color-green-line: oklch(0.86 0.06 156);
+  --color-green-deep: oklch(0.262 0.05 162);
+  --color-green-deep-2: oklch(0.33 0.058 160);
+  --color-on-deep: oklch(0.94 0.02 158);
+  --color-on-deep-2: oklch(0.78 0.03 158);
+
+  --color-red: oklch(0.53 0.17 27);
+  --color-red-soft: oklch(0.958 0.022 27);
+  --color-amber: oklch(0.45 0.095 68);
+  --color-amber-soft: oklch(0.955 0.045 86);
+
+  --radius-panel: 10px;
+  --radius-control: 8px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* Liczby w kolumnach muszą stać równo. */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-green);
+  outline-offset: 2px;
+}
+
+/* Naciśnięcie: interfejs odpowiada od razu. */
+.press {
+  transition:
+    transform 140ms var(--ease-out),
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+.press:active {
+  transform: scale(0.975);
+}
+
+/* Pola liczbowe bez strzałek: przeszkadzają na telefonie. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Suwak w kolorze marki, natywny i dostępny z klawiatury. */
+input[type="range"] {
+  accent-color: var(--color-green);
+  width: 100%;
+  height: 1.5rem;
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------
+   Panel edycji na natywnym <dialog>: z prawej na komputerze,
+   od dołu na telefonie.
+   ------------------------------------------------------------------ */
+dialog.sheet {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--color-surface);
+  color: inherit;
+  max-width: none;
+  position: fixed;
+  inset: auto 0 0 0;
+  width: 100%;
+  height: auto;
+  max-height: 92dvh;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -12px 40px -12px oklch(0.26 0.05 162 / 0.25);
+  overflow: hidden;
+  transition:
+    transform 260ms var(--ease-drawer),
+    opacity 200ms ease,
+    overlay 260ms allow-discrete,
+    display 260ms allow-discrete;
+}
+dialog.sheet:not([open]) {
+  transform: translateY(100%);
+  opacity: 0;
+}
+@starting-style {
+  dialog.sheet[open] {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+}
+dialog.sheet::backdrop {
+  background: oklch(0.2 0.03 162 / 0.38);
+  transition:
+    opacity 200ms ease,
+    overlay 200ms allow-discrete,
+    display 200ms allow-discrete;
+}
+dialog.sheet:not([open])::backdrop {
+  opacity: 0;
+}
+@starting-style {
+  dialog.sheet[open]::backdrop {
+    opacity: 0;
+  }
+}
+
+@media (min-width: 768px) {
+  dialog.sheet {
+    inset: 0 0 0 auto;
+    width: 440px;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    border-left: 1px solid var(--color-line);
+    box-shadow: -16px 0 48px -20px oklch(0.26 0.05 162 / 0.28);
+  }
+  dialog.sheet:not([open]) {
+    transform: translateX(100%);
+  }
+  @starting-style {
+    dialog.sheet[open] {
+      transform: translateX(100%);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+  dialog.sheet:not([open]) {
+    transform: none;
+  }
+}
