@@ -117,11 +117,15 @@ export function Settings() {
           </div>
         </Panel>
 
-        <Panel title="Paliwo aut na procent">
+        <Panel title="Szacunek paliwa">
           <div className="grid grid-cols-2 gap-3">
             {num("lpgPerShiftGross", "LPG brutto na zmianę", "zł")}
-            {num("lpgShiftHours", "Długość zmiany", "h", "Koszt paliwa liczony jest proporcjonalnie do godzin.")}
+            {num("lpgShiftHours", "Długość zmiany", "h", "Koszt liczony proporcjonalnie do godzin online.")}
           </div>
+          <p className="mt-3 text-[0.8125rem] leading-snug text-ink-3">
+            Używany, gdy w rozliczeniu tygodnia nie wpiszesz realnego kosztu paliwa z rachunków. Kalkulator zawsze
+            liczy szacunkiem.
+          </p>
         </Panel>
 
         <Panel title="Spółka i podatki">

@@ -58,6 +58,10 @@ export interface Settlement {
   /** Łączna kwota do zapłaty przez kierowcę (wynajem). */
   dueFromDriver: number;
   lpgNet: number;
+  /** Czy koszt paliwa pochodzi z rachunków, a nie z szacunku. */
+  fuelActual: boolean;
+  /** Właściciel spółki: brak wypłaty, cały utarg dla spółki. */
+  ownerDrive: boolean;
   /** Przychód spółki netto z tego rozliczenia. */
   income: number;
   /** Co zostaje spółce po kierowcy i paliwie, przed kosztami auta. */
@@ -65,9 +69,41 @@ export interface Settlement {
   ratePerHour: number;
 }
 
+/** Paliwo netto: z rachunków, jeśli wpisane, inaczej szacunek z godzin. */
+export function fuelNet(e: Pick<Entry, "hours" | "fuelGross">, p: Params) {
+  if (e.fuelGross !== null && e.fuelGross !== undefined && Number.isFinite(e.fuelGross))
+    return net(Math.max(0, e.fuelGross), p);
+  return net((e.hours / p.lpgShiftHours) * p.lpgPerShiftGross, p);
+}
+
 export function settle(e: Entry, p: Params): Settlement {
   const reached = e.trips >= p.tripThreshold;
   const ratePerHour = e.hours > 0 ? e.revenue / e.hours : 0;
+  const fuelActual = e.fuelGross !== null && e.fuelGross !== undefined;
+
+  /* Właściciel jeździ dla własnej spółki: nie dostaje udziału, dopłaty
+     ani ZUS od wypłaty, nie płaci czynszu. Utarg trafia w całości do spółki,
+     która płaci za paliwo. Jego wynagrodzenie to koszt zarządu w ustawieniach. */
+  if (e.owner) {
+    const lpgNet = fuelNet(e, p);
+    return {
+      reached,
+      rate: 0,
+      share: 0,
+      topUp: 0,
+      payout: 0,
+      employerZus: 0,
+      rentGross: 0,
+      fee: 0,
+      dueFromDriver: 0,
+      lpgNet,
+      fuelActual,
+      ownerDrive: true,
+      income: e.revenue,
+      margin: e.revenue - lpgNet,
+      ratePerHour,
+    };
+  }
 
   if (e.mode === "rental") {
     const rentGross = reached ? p.rentReduced : p.rentBase;
@@ -84,6 +120,8 @@ export function settle(e: Entry, p: Params): Settlement {
       fee,
       dueFromDriver: rentGross + fee + e.deduction - e.bonus,
       lpgNet: 0,
+      fuelActual: false,
+      ownerDrive: false,
       income,
       margin: income + e.deduction - e.bonus,
       ratePerHour,
@@ -101,7 +139,7 @@ export function settle(e: Entry, p: Params): Settlement {
   const topUp = p.minWageTopUp ? Math.max(0, e.hours * p.minWage - share) : 0;
   const payout = share + topUp + e.bonus - e.deduction;
   const employerZus = e.student ? 0 : (share + topUp + e.bonus) * p.employerZus;
-  const lpgNet = net((e.hours / p.lpgShiftHours) * p.lpgPerShiftGross, p);
+  const lpgNet = fuelNet(e, p);
 
   return {
     reached,
@@ -114,6 +152,8 @@ export function settle(e: Entry, p: Params): Settlement {
     fee: 0,
     dueFromDriver: 0,
     lpgNet,
+    fuelActual,
+    ownerDrive: false,
     income: e.revenue,
     margin: e.revenue - payout - employerZus - lpgNet,
     ratePerHour,
@@ -158,8 +198,11 @@ export function weekResult(entries: Entry[], vehicles: Vehicle[], p: Params): We
     hours += e.hours;
     trips += e.trips;
     lpg += s.lpgNet;
-    driverCost +=
-      e.mode === "commission" ? s.payout + s.employerZus : e.bonus - e.deduction;
+    driverCost += s.ownerDrive
+      ? 0
+      : e.mode === "commission"
+        ? s.payout + s.employerZus
+        : e.bonus - e.deduction;
   }
 
   const fixedCars =

@@ -263,7 +263,7 @@ function Notice({ email, text, onBack }: { email: string; text: string; onBack: 
 const SAMPLE = [
   { label: "Przychód spółki", value: "25 994 zł", w: 100, in: true },
   { label: "Kierowcy", value: "−14 540 zł", w: 56 },
-  { label: "LPG", value: "−2 355 zł", w: 9 },
+  { label: "Paliwo", value: "−2 355 zł", w: 9 },
   { label: "Auta", value: "−4 504 zł", w: 17 },
   { label: "Spółka", value: "−4 112 zł", w: 16 },
 ];

@@ -44,6 +44,8 @@ create table if not exists public.postoj_drivers (
   vehicle_id text,
   shift      text not null check (shift in ('day', 'night', 'flex')),
   active     boolean not null default true,
+  -- Właściciel spółki za kierownicą: bez wypłaty, utarg w całości dla spółki.
+  is_owner   boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (owner, id),
@@ -64,7 +66,10 @@ create table if not exists public.postoj_entries (
   -- usunięcie auta nie może zmieniać historii.
   mode       text not null check (mode in ('commission', 'rental')),
   student    boolean not null default false,
+  is_owner   boolean not null default false,
   vehicle_id text,
+  -- Realny koszt paliwa brutto za tydzień. NULL = szacunek z ustawień.
+  fuel_gross numeric(12, 2) check (fuel_gross is null or fuel_gross >= 0),
   revenue    numeric(12, 2) not null default 0,
   hours      numeric(8, 2) not null default 0,
   trips      integer not null default 0,
@@ -76,6 +81,12 @@ create table if not exists public.postoj_entries (
   primary key (owner, id),
   foreign key (owner, driver_id) references public.postoj_drivers (owner, id) on delete cascade
 );
+
+-- Kolumny dodane po pierwszej wersji. Dla bazy założonej wcześniej
+-- uruchomienie całego pliku jeszcze raz dopisze je bez utraty danych.
+alter table public.postoj_drivers add column if not exists is_owner boolean not null default false;
+alter table public.postoj_entries add column if not exists is_owner boolean not null default false;
+alter table public.postoj_entries add column if not exists fuel_gross numeric(12, 2);
 
 create index if not exists postoj_entries_week on public.postoj_entries (owner, week);
 create index if not exists postoj_entries_driver on public.postoj_entries (owner, driver_id);

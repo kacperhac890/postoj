@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { Check, Receipt } from "@phosphor-icons/react";
-import { settle } from "../domain/engine";
+import { fuelNet, settle } from "../domain/engine";
 import { num1, pct, plural, zl, zlExact } from "../domain/format";
 import type { Driver, Entry, Vehicle } from "../domain/types";
 import { lastFullWeek, weekNumber } from "../domain/week";
@@ -11,7 +11,20 @@ import { Sheet, useRetained } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
 import { Tween } from "../ui/motion";
 import { WeekSwitcher } from "../ui/WeekSwitcher";
-import { Badge, Button, Empty, Field, NumberInput, PageHeader, Panel, Plate, Row, cn } from "../ui/kit";
+import {
+  Badge,
+  Button,
+  Empty,
+  Field,
+  NumberInput,
+  OptionalNumberInput,
+  PageHeader,
+  Panel,
+  Plate,
+  Row,
+  Toggle,
+  cn,
+} from "../ui/kit";
 
 const COLS =
   "md:grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,0.55fr)_minmax(0,0.55fr)_minmax(0,0.7fr)_minmax(0,1fr)_7.5rem]";
@@ -46,7 +59,11 @@ export function Settlements() {
         return { driver, vehicle, entry };
       })
       .filter((l) => l.entry || (l.driver.active && l.vehicle))
-      .sort((a, b) => (a.vehicle?.plate ?? "").localeCompare(b.vehicle?.plate ?? "") || a.driver.name.localeCompare(b.driver.name, "pl"));
+      .sort(
+        (a, b) =>
+          (a.vehicle?.plate ?? "").localeCompare(b.vehicle?.plate ?? "") ||
+          a.driver.name.localeCompare(b.driver.name, "pl"),
+      );
   }, [drivers, vehicles, entries, week]);
 
   const totals = useMemo(() => {
@@ -60,7 +77,8 @@ export function Settlements() {
       const s = settle(l.entry, params);
       revenue += l.entry.revenue;
       margin += s.margin;
-      if (!l.entry.paid) {
+      /* Właściciel nie dostaje wypłaty: nie ma czego rozliczać. */
+      if (!l.entry.paid && !s.ownerDrive) {
         unpaid.push(l.entry.id);
         if (l.entry.mode === "commission") toPay += s.payout;
         else toCollect += s.dueFromDriver;
@@ -88,7 +106,9 @@ export function Settlements() {
       week,
       mode: l.vehicle.mode,
       student: l.driver.student,
+      owner: l.driver.owner,
       vehicleId: l.vehicle.id,
+      fuelGross: null,
       revenue: 0,
       hours: 0,
       trips: 0,
@@ -119,7 +139,11 @@ export function Settlements() {
       {lines.length > 0 ? (
         <dl className="mb-4 grid grid-cols-2 overflow-hidden rounded-panel border border-line bg-surface md:grid-cols-4">
           {[
-            { label: "Do wypłaty kierowcom", value: <Tween value={totals.toPay} format={zl} />, accent: totals.toPay > 0 },
+            {
+              label: "Do wypłaty kierowcom",
+              value: <Tween value={totals.toPay} format={zl} />,
+              accent: totals.toPay > 0,
+            },
             {
               label: "Do pobrania od najemców",
               value: <Tween value={totals.toCollect} format={zl} />,
@@ -240,7 +264,8 @@ export function Settlements() {
                         {l.driver.name}
                       </span>
                       {l.vehicle ? <Plate>{l.vehicle.plate}</Plate> : null}
-                      {rental ? <Badge>Wynajem</Badge> : null}
+                      {rental && !s?.ownerDrive ? <Badge>Wynajem</Badge> : null}
+                      {(l.entry ? l.entry.owner : l.driver.owner) ? <Badge tone="green">Właściciel</Badge> : null}
                       {s?.reached ? <Badge tone="green">Próg kursów</Badge> : null}
                     </button>
 
@@ -266,30 +291,42 @@ export function Settlements() {
                         </span>
                         <span className="text-right">
                           <span className="num block text-[0.9375rem] font-semibold text-ink">
-                            {zl(rental ? s.dueFromDriver : s.payout)}
+                            {zl(s.ownerDrive ? s.income : rental ? s.dueFromDriver : s.payout)}
                           </span>
                           <span className="block text-[0.6875rem] text-ink-3">
-                            {rental ? "do pobrania" : s.topUp > 0 ? "z dopłatą do minimum" : `stawka ${pct(s.rate)}`}
+                            {s.ownerDrive
+                              ? "całość do spółki"
+                              : rental
+                                ? "do pobrania"
+                                : s.topUp > 0
+                                  ? "z dopłatą do minimum"
+                                  : `stawka ${pct(s.rate)}`}
                           </span>
                         </span>
-                        <span className="col-span-2 md:col-span-1 md:text-right">
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={l.entry.paid}
-                            aria-label={`Rozliczone: ${l.driver.name}`}
-                            onClick={() => setPaid([l.entry!.id], !l.entry!.paid)}
-                            className={cn(
-                              "press inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium transition-colors duration-200",
-                              l.entry.paid
-                                ? "border-green-line bg-green-soft text-green-ink"
-                                : "border-line-strong bg-surface text-ink-2 hover:bg-sunken",
-                            )}
-                          >
-                            {l.entry.paid ? <Check size={13} weight="bold" className="check-pop" /> : null}
-                            {l.entry.paid ? "Rozliczone" : "Do rozliczenia"}
-                          </button>
-                        </span>
+                        {s.ownerDrive ? (
+                          <span className="col-span-2 text-[0.8125rem] text-ink-3 md:col-span-1 md:text-right">
+                            Bez wypłaty
+                          </span>
+                        ) : (
+                          <span className="col-span-2 md:col-span-1 md:text-right">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={l.entry.paid}
+                              aria-label={`Rozliczone: ${l.driver.name}`}
+                              onClick={() => setPaid([l.entry!.id], !l.entry!.paid)}
+                              className={cn(
+                                "press inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium transition-colors duration-200",
+                                l.entry.paid
+                                  ? "border-green-line bg-green-soft text-green-ink"
+                                  : "border-line-strong bg-surface text-ink-2 hover:bg-sunken",
+                              )}
+                            >
+                              {l.entry.paid ? <Check size={13} weight="bold" className="check-pop" /> : null}
+                              {l.entry.paid ? "Rozliczone" : "Do rozliczenia"}
+                            </button>
+                          </span>
+                        )}
                       </>
                     ) : (
                       <>
@@ -342,7 +379,7 @@ export function Settlements() {
             <div className="flex flex-wrap items-center gap-2 text-[0.8125rem] text-ink-2">
               {shownVehicle ? <Plate>{shownVehicle.plate}</Plate> : null}
               <Badge>{shown.mode === "rental" ? "Wynajem" : "Na procent"}</Badge>
-              {shown.mode === "commission" ? (
+              {shown.mode === "commission" && !shown.owner ? (
                 <Badge tone={shown.student ? "green" : "neutral"}>
                   {shown.student ? "Student" : "Bez statusu studenta"}
                 </Badge>
@@ -360,17 +397,64 @@ export function Settlements() {
                 <NumberInput value={shown.trips} onChange={(trips) => patch({ trips: Math.round(trips) })} />
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Premia">
-                <NumberInput value={shown.bonus} onChange={(bonus) => patch({ bonus })} suffix="zł" />
+            {shown.mode === "commission" || shown.owner ? (
+              <Field
+                label="Paliwo, realny koszt brutto"
+                hint={
+                  shown.fuelGross === null
+                    ? `Z rachunków lub karty paliwowej tego auta za ten tydzień. Puste pole: szacunek ${zl(
+                        fuelNet({ hours: shown.hours, fuelGross: null }, params) * (1 + params.vatStd),
+                      )} brutto z godzin online.`
+                    : "Wpisany koszt zastępuje szacunek. Wyczyść pole, żeby wrócić do szacunku."
+                }
+              >
+                <OptionalNumberInput
+                  value={shown.fuelGross}
+                  onChange={(fuelGross) => patch({ fuelGross })}
+                  suffix="zł"
+                  placeholder="szacunek"
+                />
               </Field>
-              <Field label="Potrącenie" hint="Mandat, szkoda, zaliczka.">
-                <NumberInput value={shown.deduction} onChange={(deduction) => patch({ deduction })} suffix="zł" />
-              </Field>
-            </div>
+            ) : null}
+
+            <Toggle
+              checked={shown.owner}
+              onChange={(owner) => patch({ owner })}
+              label="Jeździł właściciel spółki"
+              hint="Bez wypłaty i składek. Utarg w całości trafia do spółki."
+            />
+
+            {!shown.owner ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Premia">
+                  <NumberInput value={shown.bonus} onChange={(bonus) => patch({ bonus })} suffix="zł" />
+                </Field>
+                <Field label="Potrącenie" hint="Mandat, szkoda, zaliczka.">
+                  <NumberInput value={shown.deduction} onChange={(deduction) => patch({ deduction })} suffix="zł" />
+                </Field>
+              </div>
+            ) : null}
 
             <div className="rounded-control bg-sunken px-4 py-3" aria-live="polite">
-              {shown.mode === "commission" ? (
+              {preview.ownerDrive ? (
+                <>
+                  <Row label="Utarg dla spółki" value={zlExact(preview.income)} />
+                  <Row label="Wypłata" hint="właściciel" value={zlExact(0)} />
+                  <Row
+                    label="Paliwo netto"
+                    hint={preview.fuelActual ? "z rachunków" : "szacunek"}
+                    value={zlExact(-preview.lpgNet)}
+                  />
+                  <div className="my-1.5 border-t border-line-strong" />
+                  <Row
+                    label="Zostaje spółce"
+                    hint="przed kosztami auta"
+                    value={zlExact(preview.margin)}
+                    strong
+                    tone={preview.margin < 0 ? "red" : "green"}
+                  />
+                </>
+              ) : shown.mode === "commission" ? (
                 <>
                   <Row
                     label="Udział w utargu"
@@ -392,7 +476,11 @@ export function Settlements() {
                     {preview.employerZus > 0 ? (
                       <Row label="ZUS pracodawcy" value={zlExact(preview.employerZus)} />
                     ) : null}
-                    <Row label="LPG, szacunek netto" value={zlExact(preview.lpgNet)} />
+                    <Row
+                      label="Paliwo netto"
+                      hint={preview.fuelActual ? "z rachunków" : "szacunek"}
+                      value={zlExact(preview.lpgNet)}
+                    />
                     <Row
                       label="Zostaje spółce"
                       hint="przed kosztami auta"

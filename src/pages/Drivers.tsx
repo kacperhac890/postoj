@@ -28,6 +28,7 @@ const blank = (): Driver => ({
   name: "",
   phone: "",
   student: false,
+  owner: false,
   vehicleId: null,
   shift: "day",
   active: true,
@@ -83,7 +84,7 @@ export function Drivers() {
     return sorted.filter((d) => {
       if (filter === "active" && !d.active) return false;
       if (filter === "benched" && !(d.active && !d.vehicleId)) return false;
-      if (filter === "students" && !(d.active && d.student)) return false;
+      if (filter === "students" && !(d.active && d.student && !d.owner)) return false;
       if (filter === "inactive" && d.active) return false;
       if (!q) return true;
       const plate = d.vehicleId ? (plates.get(d.vehicleId) ?? "") : "";
@@ -93,7 +94,7 @@ export function Drivers() {
 
   const active = drivers.filter((d) => d.active).length;
   const benched = drivers.filter((d) => d.active && !d.vehicleId).length;
-  const students = drivers.filter((d) => d.active && d.student).length;
+  const students = drivers.filter((d) => d.active && d.student && !d.owner).length;
   const entryCount = shown ? entries.filter((e) => e.driverId === shown.id).length : 0;
   const shownVehicle = shown ? vehicles.find((v) => v.id === shown.vehicleId) : undefined;
 
@@ -194,7 +195,8 @@ export function Drivers() {
                     >
                       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="truncate text-[0.9375rem] font-medium text-ink">{d.name}</span>
-                        {d.student ? <Badge tone="green">Student</Badge> : null}
+                        {d.owner ? <Badge tone="green">Właściciel</Badge> : null}
+                        {d.student && !d.owner ? <Badge tone="green">Student</Badge> : null}
                         {!d.active ? <Badge>Nieaktywny</Badge> : null}
                       </span>
 
@@ -297,15 +299,28 @@ export function Drivers() {
             </Field>
 
             <Toggle
-              checked={shown.student}
-              onChange={(student) => patch({ student })}
-              label="Student do 26 lat"
+              checked={shown.owner}
+              onChange={(owner) => patch({ owner })}
+              label="Właściciel spółki"
               hint={
-                shown.student
-                  ? `Stawka ${pct(params.studentBase)}, po progu kursów ${pct(params.studentHigh)}. Bez składek ZUS po stronie spółki.`
-                  : `Stawka ${pct(params.regularBase)}, po progu kursów ${pct(params.regularHigh)}. Spółka dolicza ZUS pracodawcy.`
+                shown.owner
+                  ? "Bez wypłaty, dopłaty do minimum i ZUS. Cały utarg trafia na konto spółki, spółka płaci za paliwo."
+                  : "Zaznacz, jeśli za kierownicą siedzi właściciel. Wtedy nie liczymy mu wypłaty."
               }
             />
+
+            {!shown.owner ? (
+              <Toggle
+                checked={shown.student}
+                onChange={(student) => patch({ student })}
+                label="Student do 26 lat"
+                hint={
+                  shown.student
+                    ? `Stawka ${pct(params.studentBase)}, po progu kursów ${pct(params.studentHigh)}. Bez składek ZUS po stronie spółki.`
+                    : `Stawka ${pct(params.regularBase)}, po progu kursów ${pct(params.regularHigh)}. Spółka dolicza ZUS pracodawcy.`
+                }
+              />
+            ) : null}
 
             <Field
               label="Auto"

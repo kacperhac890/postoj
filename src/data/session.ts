@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Session } from "@supabase/supabase-js";
 import { defaultParams, planScenario } from "../domain/engine";
+import { normDriver, normEntry } from "../domain/normalize";
 import type { Scenario } from "../domain/engine";
 import type { FleetData } from "../domain/seed";
 import type { Params } from "../domain/types";
@@ -243,8 +244,8 @@ export function readLocalCopy(): LocalCopy | null {
     if (s.vehicles.length + s.drivers.length + s.entries.length === 0) return null;
     return {
       vehicles: s.vehicles,
-      drivers: s.drivers,
-      entries: s.entries,
+      drivers: s.drivers.map(normDriver),
+      entries: s.entries.map(normEntry),
       params: { ...defaultParams, ...(s.params ?? {}) },
       scenario: { ...planScenario, ...(s.scenario ?? {}) },
     };

@@ -91,6 +91,7 @@ export function demoData(today = new Date()): FleetData {
     vehicleId: vehicle ? `demo-v${vehicle}` : null,
     shift,
     active,
+    owner: false,
   });
 
   const drivers: Driver[] = [
@@ -143,6 +144,8 @@ export function demoData(today = new Date()): FleetData {
         week,
         mode: vehicle.mode,
         student: d.student,
+        owner: false,
+        fuelGross: null,
         vehicleId: vehicle.id,
         revenue: Math.round(hours * rate),
         hours,

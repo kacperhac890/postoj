@@ -39,6 +39,8 @@ export interface Driver {
   vehicleId: string | null;
   shift: Shift;
   active: boolean;
+  /** Właściciel spółki za kierownicą: bez wypłaty, cały utarg zostaje w spółce. */
+  owner: boolean;
 }
 
 /** Tygodniowe dane kierowcy z aplikacji. */
@@ -51,7 +53,11 @@ export interface Entry {
      studenta nie może po cichu przepisywać historii. */
   mode: Mode;
   student: boolean;
+  /** Kierowca był w tym tygodniu właścicielem spółki: bez wypłaty. */
+  owner: boolean;
   vehicleId: string | null;
+  /** Realny koszt paliwa brutto za ten tydzień. Brak (null) = szacunek z ustawień. */
+  fuelGross: number | null;
   /** Utarg netto po prowizji aplikacji. */
   revenue: number;
   hours: number;

@@ -31,3 +31,14 @@ describe("mapowanie wierszy bazy", () => {
     expect(d.vehicleId).toBeNull();
   });
 });
+
+describe("nowe pola w bazie", () => {
+  const data = demoData(new Date(2026, 10, 16));
+  it("właściciel i realne paliwo przechodzą przez bazę", () => {
+    const d = { ...data.drivers[0], owner: true };
+    const e = { ...data.entries[0], owner: true, fuelGross: 312.4 };
+    expect(rowToDriver(driverToRow(d))).toEqual(d);
+    expect(rowToEntry(entryToRow(e))).toEqual(e);
+    expect(rowToEntry({ ...entryToRow(e), fuel_gross: "312.40" }).fuelGross).toBe(312.4);
+  });
+});

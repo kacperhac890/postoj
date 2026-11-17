@@ -54,6 +54,7 @@ export const driverToRow = (d: Driver): Row => ({
   vehicle_id: d.vehicleId,
   shift: d.shift,
   active: d.active,
+  is_owner: d.owner,
 });
 
 export const rowToDriver = (r: Row): Driver => ({
@@ -64,6 +65,7 @@ export const rowToDriver = (r: Row): Driver => ({
   vehicleId: r.vehicle_id == null ? null : String(r.vehicle_id),
   shift: r.shift as Shift,
   active: Boolean(r.active),
+  owner: Boolean(r.is_owner),
 });
 
 export const entryToRow = (e: Entry): Row => ({
@@ -72,7 +74,9 @@ export const entryToRow = (e: Entry): Row => ({
   week: e.week,
   mode: e.mode,
   student: e.student,
+  is_owner: e.owner,
   vehicle_id: e.vehicleId,
+  fuel_gross: e.fuelGross == null ? null : n(e.fuelGross),
   revenue: n(e.revenue),
   hours: n(e.hours),
   trips: Math.round(n(e.trips)),
@@ -87,7 +91,9 @@ export const rowToEntry = (r: Row): Entry => ({
   week: String(r.week),
   mode: r.mode as Mode,
   student: Boolean(r.student),
+  owner: Boolean(r.is_owner),
   vehicleId: r.vehicle_id == null ? null : String(r.vehicle_id),
+  fuelGross: r.fuel_gross == null ? null : n(r.fuel_gross),
   revenue: n(r.revenue),
   hours: n(r.hours),
   trips: n(r.trips),

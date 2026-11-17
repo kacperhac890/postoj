@@ -4,6 +4,7 @@ import { Car, Check, Plus } from "@phosphor-icons/react";
 import { vehicleMonthlyNet } from "../domain/engine";
 import { daysUntil, plural, shortDate, toIso, zl } from "../domain/format";
 import { MODE_LABEL, PREP_STEPS, STATUS_LABEL } from "../domain/labels";
+import { weekNumber } from "../domain/week";
 import type { Mode, Vehicle, VehicleStatus } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
 import { ListToolbar, NoMatches, fold } from "../ui/Filters";
@@ -370,6 +371,8 @@ export function Fleet() {
               netto.
             </p>
 
+            {!isNew ? <FuelSummary vehicleId={shown.id} /> : null}
+
             <div className="grid grid-cols-2 gap-3">
               <Field label="Przegląd ważny do">
                 <TextInput
@@ -423,5 +426,44 @@ export function Fleet() {
         ) : null}
       </Sheet>
     </>
+  );
+}
+
+/** Realne paliwo auta z ostatnich tygodni, na podstawie wpisów w rozliczeniach. */
+function FuelSummary({ vehicleId }: { vehicleId: string }) {
+  const entries = useFleet((s) => s.entries);
+  const weeks = useMemo(() => {
+    const byWeek = new Map<string, number>();
+    for (const e of entries) {
+      if (e.vehicleId !== vehicleId || e.fuelGross === null) continue;
+      byWeek.set(e.week, (byWeek.get(e.week) ?? 0) + e.fuelGross);
+    }
+    return [...byWeek.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).slice(0, 4);
+  }, [entries, vehicleId]);
+
+  if (weeks.length === 0)
+    return (
+      <p className="rounded-control bg-sunken px-3 py-2.5 text-[0.8125rem] leading-snug text-ink-2">
+        Paliwo tego auta liczymy na razie szacunkiem. Realny koszt z rachunków wpiszesz w rozliczeniu tygodnia.
+      </p>
+    );
+
+  const avg = weeks.reduce((s, [, v]) => s + v, 0) / weeks.length;
+  return (
+    <div className="rounded-control bg-sunken px-3 py-2.5">
+      <div className="flex items-baseline justify-between gap-3 text-[0.8125rem]">
+        <span className="font-medium text-ink">Paliwo z rachunków</span>
+        <span className="num text-ink-2">
+          średnio <span className="font-semibold text-ink">{zl(avg)}</span> brutto na tydzień
+        </span>
+      </div>
+      <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.75rem] text-ink-3">
+        {weeks.map(([week, value]) => (
+          <li key={week} className="num">
+            tydz. {weekNumber(week)}: {zl(value)}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

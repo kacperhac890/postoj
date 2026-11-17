@@ -88,7 +88,7 @@ export function Dashboard() {
     let toCollect = 0;
     let collectCount = 0;
     for (const e of entries) {
-      if (e.paid) continue;
+      if (e.paid || e.owner) continue;
       const s = settle(e, params);
       if (e.mode === "commission") {
         toPay += s.payout;
@@ -205,10 +205,22 @@ export function Dashboard() {
     );
   }
 
+  /* Ile rozliczeń z paliwem ma koszt z rachunków, a ile szacunek. */
+  const fuelEntries = inWeek.filter((e) => e.mode === "commission" || e.owner);
+  const fuelReal = fuelEntries.filter((e) => e.fuelGross !== null).length;
+  const fuelHint =
+    fuelEntries.length === 0
+      ? "auta na procent"
+      : fuelReal === 0
+        ? "szacunek z godzin"
+        : fuelReal === fuelEntries.length
+          ? "z rachunków"
+          : `${fuelReal} z ${fuelEntries.length} z rachunków, reszta szacunek`;
+
   const ledger = [
     { label: "Przychód spółki", hint: "utarg aut na procent, czynsze i opłaty najmu", value: r.income, kind: "in" },
     { label: "Kierowcy", hint: "wypłaty, dopłaty do minimum, ZUS", value: -r.driverCost, kind: "out" },
-    { label: "LPG", hint: "auta na procent, szacunek", value: -r.lpg, kind: "out" },
+    { label: "Paliwo", hint: fuelHint, value: -r.lpg, kind: "out" },
     { label: "Auta", hint: "leasing, ubezpieczenie, serwis", value: -r.fixedCars, kind: "out" },
     { label: "Spółka", hint: "zarząd, księgowość", value: -r.overhead, kind: "out" },
   ] as const;

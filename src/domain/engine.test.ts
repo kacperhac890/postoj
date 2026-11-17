@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { breakEvenRate, defaultParams, model, planScenario, settle } from "./engine";
+import { breakEvenRate, defaultParams, model, planScenario, settle, weekResult } from "./engine";
+import { normEntry } from "./normalize";
 import type { Entry } from "./types";
 
 const entry = (over: Partial<Entry>): Entry => ({
@@ -8,7 +9,9 @@ const entry = (over: Partial<Entry>): Entry => ({
   week: "2026-W46",
   mode: "commission",
   student: true,
+  owner: false,
   vehicleId: "v",
+  fuelGross: null,
   revenue: 4400,
   hours: 80,
   trips: 130,
@@ -99,5 +102,72 @@ describe("rozliczenie tygodniowe", () => {
     });
     expect(s.topUp).toBe(0);
     expect(s.payout).toBeCloseTo(1980, 2);
+  });
+});
+
+describe("paliwo z rachunków", () => {
+  const p = defaultParams;
+
+  it("bez wpisu paliwo liczy się szacunkiem z godzin", () => {
+    const s = settle(entry({ hours: 84, fuelGross: null }), p);
+    /* 84 h / 12 h × 80 zł brutto = 560 zł brutto, netto 455,28 zł */
+    expect(s.lpgNet).toBeCloseTo(560 / 1.23, 2);
+    expect(s.fuelActual).toBe(false);
+  });
+
+  it("realny koszt zastępuje szacunek i obniża to, co zostaje spółce", () => {
+    const est = settle(entry({ fuelGross: null }), p);
+    const real = settle(entry({ fuelGross: 615 }), p);
+    expect(real.lpgNet).toBeCloseTo(500, 2);
+    expect(real.fuelActual).toBe(true);
+    expect(real.payout).toBeCloseTo(est.payout, 6);
+    expect(est.margin - real.margin).toBeCloseTo(500 - est.lpgNet, 6);
+  });
+
+  it("zero zł paliwa to wpis, a nie brak wpisu", () => {
+    const s = settle(entry({ fuelGross: 0 }), p);
+    expect(s.lpgNet).toBe(0);
+    expect(s.fuelActual).toBe(true);
+  });
+
+  it("w wynajmie paliwo płaci kierowca, wpis nic nie zmienia", () => {
+    const s = settle(entry({ mode: "rental", fuelGross: 400 }), p);
+    expect(s.lpgNet).toBe(0);
+  });
+});
+
+describe("właściciel spółki za kierownicą", () => {
+  const p = defaultParams;
+
+  it("bez wypłaty, dopłaty i ZUS, cały utarg zostaje w spółce", () => {
+    const s = settle(entry({ owner: true, student: false, revenue: 4400, hours: 80, trips: 50, fuelGross: 492 }), p);
+    expect(s.ownerDrive).toBe(true);
+    expect(s.payout).toBe(0);
+    expect(s.topUp).toBe(0);
+    expect(s.employerZus).toBe(0);
+    expect(s.income).toBe(4400);
+    expect(s.margin).toBeCloseTo(4400 - 400, 6);
+  });
+
+  it("na aucie z wynajmu nie płaci czynszu, utarg idzie do spółki", () => {
+    const s = settle(entry({ owner: true, mode: "rental", revenue: 3000, fuelGross: null }), p);
+    expect(s.rentGross).toBe(0);
+    expect(s.dueFromDriver).toBe(0);
+    expect(s.income).toBe(3000);
+  });
+
+  it("w wyniku tygodnia koszt kierowców właściciela wynosi zero", () => {
+    const r = weekResult([entry({ owner: true, bonus: 200 })], [], p);
+    expect(r.driverCost).toBe(0);
+    expect(r.income).toBe(4400);
+  });
+
+  it("dane ze starszej wersji: brak pól oznacza zwykłego kierowcę i szacunek paliwa", () => {
+    const old = { ...entry({}) } as Partial<Entry>;
+    delete old.owner;
+    delete old.fuelGross;
+    const e = normEntry(old as Entry);
+    expect(e.owner).toBe(false);
+    expect(e.fuelGross).toBeNull();
   });
 });

@@ -69,6 +69,8 @@ export function describeError(err: unknown): string {
     return "Hasło jest za słabe. Użyj co najmniej 8 znaków.";
   if (m.includes("rate limit") || m.includes("too many"))
     return "Za dużo prób w krótkim czasie. Odczekaj chwilę.";
+  if ((m.includes("column") && (m.includes("does not exist") || m.includes("could not find"))) || m.includes("schema cache"))
+    return "Baza wymaga aktualizacji. Uruchom ponownie plik supabase/schema.sql w Supabase (SQL Editor).";
   if (m.includes("relation") && m.includes("does not exist"))
     return "W bazie brakuje tabel. Uruchom plik supabase/schema.sql w Supabase.";
   if (m.includes("jwt") || m.includes("not authenticated"))

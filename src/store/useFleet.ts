@@ -4,6 +4,7 @@ import { api, enqueue } from "../data/cloud";
 import { isCloud } from "../data/mode";
 import { defaultParams, planScenario } from "../domain/engine";
 import type { Scenario } from "../domain/engine";
+import { normDriver, normEntry } from "../domain/normalize";
 import { demoData } from "../domain/seed";
 import type { FleetData } from "../domain/seed";
 import type { Driver, Entry, Params, Vehicle } from "../domain/types";
@@ -167,8 +168,8 @@ export const useFleet = create<FleetState>()(
         if (!isList(d.vehicles) || !isList(d.drivers) || !isList(d.entries)) return false;
         set((s) => ({
           vehicles: d.vehicles as unknown as Vehicle[],
-          drivers: d.drivers as unknown as Driver[],
-          entries: d.entries as unknown as Entry[],
+          drivers: (d.drivers as unknown as Driver[]).map(normDriver),
+          entries: (d.entries as unknown as Entry[]).map(normEntry),
           /* Parametry z pliku nakładamy na domyślne: starsza kopia nie może
              zostawić pustych pól po dodaniu nowego parametru. */
           params:
@@ -194,6 +195,8 @@ export const useFleet = create<FleetState>()(
         return {
           ...current,
           ...p,
+          ...(p.drivers ? { drivers: p.drivers.map(normDriver) } : {}),
+          ...(p.entries ? { entries: p.entries.map(normEntry) } : {}),
           params: { ...defaultParams, ...p.params },
           scenario: { ...planScenario, ...p.scenario },
         };

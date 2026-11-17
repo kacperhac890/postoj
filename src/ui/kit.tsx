@@ -241,6 +241,58 @@ export function NumberInput({
   );
 }
 
+/** Pole liczbowe, które może zostać puste (null), np. "realny koszt, jeśli znasz". */
+export function OptionalNumberInput({
+  value,
+  onChange,
+  suffix,
+  ...rest
+}: {
+  value: number | null;
+  onChange: (v: number | null) => void;
+  suffix?: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type">) {
+  const [text, setText] = useState(() => (value === null ? "" : toText(value)));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setText(value === null ? "" : toText(value));
+  }, [value]);
+
+  return (
+    <span className="relative block">
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        className={cn(controlBase, "num", suffix ? "pr-12" : undefined)}
+        value={text}
+        onFocus={(e) => {
+          focused.current = true;
+          e.currentTarget.select();
+        }}
+        onBlur={() => {
+          focused.current = false;
+          setText(value === null ? "" : toText(value));
+        }}
+        onChange={(e) => {
+          const raw = e.target.value;
+          setText(raw);
+          if (raw.trim() === "") return onChange(null);
+          const parsed = Number.parseFloat(raw.replace(/\s/g, "").replace(",", "."));
+          if (Number.isFinite(parsed)) onChange(Math.max(0, parsed));
+        }}
+        {...rest}
+      />
+      {suffix ? (
+        <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[0.8125rem] text-ink-3">
+          {suffix}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function Select({ className, children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className="relative block">

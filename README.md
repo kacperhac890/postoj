@@ -51,6 +51,17 @@ Klucz `anon` jest jawny z założenia (trafia do przeglądarki). Klucza `service
 Pliki: `src/data/cloud.ts` (połączenie, odczyt, kolejka zapisów), `src/data/session.ts` (sesja, tryby,
 logowanie), `src/data/rows.ts` (zamiana obiektów na wiersze tabel, z testami).
 
+## Paliwo i właściciel za kierownicą
+
+- W rozliczeniu tygodnia auta na procent można wpisać realny koszt paliwa brutto z rachunków. Puste pole
+  oznacza szacunek z ustawień (koszt LPG na zmianę, proporcjonalnie do godzin online). W karcie auta widać
+  średnią z ostatnich tygodni z rachunkami.
+- Kierowca oznaczony jako właściciel spółki nie dostaje wypłaty, dopłaty do minimum ani ZUS i nie płaci
+  czynszu. Cały utarg trafia do spółki, spółka płaci za paliwo. Znacznik zapisuje się też w rozliczeniu
+  tygodnia, więc późniejsza zmiana nie przepisuje historii.
+
+Po aktualizacji aplikacji z bazą trzeba ponownie uruchomić `supabase/schema.sql` (dopisuje nowe kolumny).
+
 ## Założenia modelu
 
 Kwoty netto, pełne odliczenie VAT od leasingu, serwisu i LPG, czynsz najmu przeliczany
