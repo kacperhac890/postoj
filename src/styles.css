@@ -178,12 +178,164 @@ dialog.sheet:not([open])::backdrop {
   }
 }
 
+/* ------------------------------------------------------------------
+   Ruch. Krótko i z wyraźnym wyhamowaniem. Treść jest widoczna także
+   wtedy, gdy animacja się nie odpali: animujemy tylko wejście.
+   ------------------------------------------------------------------ */
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.enter {
+  animation: enter 260ms var(--ease-out) both;
+}
+
+/* Nowy ekran po przejściu w nawigacji. */
+.page {
+  animation: enter 240ms var(--ease-out) both;
+}
+
+/* Wiersze list wchodzą jeden po drugim, najwyżej kilkanaście opóźnień. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.stagger-item {
+  animation: rise 300ms var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 12) * 26ms);
+}
+
+/* Paski proporcji: rosną od lewej przy wejściu, a przy zmianie
+   tygodnia płynnie dochodzą do nowej długości. */
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+.bar-grow {
+  transform-origin: left center;
+  animation: grow-x 640ms var(--ease-out) both;
+  animation-delay: calc(60ms + min(var(--i, 0), 12) * 45ms);
+  transition: transform 420ms var(--ease-out);
+}
+
+/* Słupki wykresu rosną od linii zera. */
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+}
+.bar-rise {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation: grow-y 520ms var(--ease-out) both;
+  animation-delay: calc(min(var(--i, 0), 12) * 35ms);
+}
+.bar-rise.below {
+  transform-origin: center top;
+}
+
+@keyframes shake {
+  20% {
+    transform: translateX(-4px);
+  }
+  40% {
+    transform: translateX(4px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+.shake {
+  animation: shake 320ms ease-in-out;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.5;
+  }
+}
+.skeleton {
+  border-radius: 6px;
+  background: var(--color-sunken);
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+/* Znak przy starcie pojawia się z opóźnieniem: przy szybkim wczytaniu
+   nie mignie wcale. */
+.splash-mark {
+  animation: enter 420ms var(--ease-out) 180ms both;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+.toast {
+  animation: toast-in 240ms var(--ease-out) both;
+}
+.toast.toast-leave {
+  animation: toast-out 180ms ease forwards;
+}
+
+/* Ptaszek przy oznaczeniu jako rozliczone. */
+@keyframes check-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.check-pop {
+  animation: check-pop 220ms var(--ease-out) both;
+}
+
+/* Wskaźnik aktywnej pozycji w nawigacji przesuwa się między pozycjami. */
+.nav-indicator {
+  transition:
+    transform 320ms var(--ease-out),
+    opacity 160ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     transition-duration: 1ms !important;
     animation-duration: 1ms !important;
+  }
+  .stagger-item,
+  .bar-grow,
+  .bar-rise,
+  .splash-mark {
+    animation-delay: 0ms !important;
+  }
+  .spin {
+    animation-duration: 1.2s !important;
   }
   dialog.sheet:not([open]) {
     transform: none;

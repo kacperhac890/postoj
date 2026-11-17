@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { num1, short, zl } from "../domain/format";
 import { weekNumber, weekRange } from "../domain/week";
 import { cn } from "../ui/kit";
@@ -101,8 +102,10 @@ export function WeekBars({
                   ) : (
                     <path
                       d={barPath(x, barW, zero, y(item.value))}
+                      style={{ "--i": i } as CSSProperties}
                       className={cn(
-                        "transition-opacity duration-150",
+                        "bar-rise transition-opacity duration-150",
+                        item.value < 0 && "below",
                         item.value < 0 ? "fill-red" : "fill-green",
                         active || hover === item.week ? "opacity-100" : "opacity-45",
                       )}
@@ -323,11 +326,11 @@ export function RateTrack({
     <div className="pt-6 pb-5">
       <div className="relative h-2 rounded-full bg-sunken">
         {breakEven !== null ? (
-          <div className="absolute inset-y-0 left-0 rounded-l-full bg-red-soft" style={{ width: pos(breakEven) }} />
+          <div className="absolute inset-y-0 left-0 rounded-l-full bg-red-soft transition-[width] duration-500 ease-[var(--ease-out)]" style={{ width: pos(breakEven) }} />
         ) : null}
 
         {breakEven !== null ? (
-          <div className="absolute -top-1.5 h-5 w-px bg-ink-2" style={{ left: pos(breakEven) }}>
+          <div className="absolute -top-1.5 h-5 w-px bg-ink-2 transition-[left] duration-500 ease-[var(--ease-out)]" style={{ left: pos(breakEven) }}>
             <span className="num absolute -top-5 left-1/2 -translate-x-1/2 text-[0.6875rem] whitespace-nowrap text-ink-2">
               próg {num1(breakEven)}
             </span>
@@ -343,7 +346,7 @@ export function RateTrack({
         {actual > 0 ? (
           <div
             className={cn(
-              "absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface",
+              "absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-surface shadow-[0_1px_3px_oklch(0.2_0.03_162/0.25)] transition-[left,background-color] duration-500 ease-[var(--ease-out)]",
               ok ? "bg-green" : "bg-red",
             )}
             style={{ left: pos(actual) }}

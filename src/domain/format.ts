@@ -5,7 +5,8 @@ const zl2 = new Intl.NumberFormat("pl-PL", { minimumFractionDigits: 2, maximumFr
 const n1 = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 1 });
 
 /* Prawdziwy minus zamiast łącznika, żeby straty były czytelne w kolumnie. */
-const sign = (s: string) => s.replace(/^-/, "−");
+/* "-0" po zaokrągleniu pokazujemy jako 0. */
+const sign = (s: string) => (/^-0([,\s]0*)?$/.test(s) ? s.slice(1) : s.replace(/^-/, "−"));
 
 /** Kwota bez groszy: 12 345 zł */
 export const zl = (v: number) => `${sign(zl0.format(Math.round(v)))} zł`;

@@ -16,6 +16,11 @@ export default defineConfig({
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/[name][extname]",
+        /* Biblioteki osobno: zmiana w aplikacji nie unieważnia ich w pamięci podręcznej. */
+        manualChunks: {
+          react: ["react", "react-dom", "react-router-dom"],
+          supabase: ["@supabase/supabase-js"],
+        },
       },
     },
   },

@@ -1,13 +1,60 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { api, enqueue } from "../data/cloud";
+import { isCloud } from "../data/mode";
 import { defaultParams, planScenario } from "../domain/engine";
 import type { Scenario } from "../domain/engine";
 import { demoData } from "../domain/seed";
 import type { FleetData } from "../domain/seed";
 import type { Driver, Entry, Params, Vehicle } from "../domain/types";
+import { toast } from "../ui/Toast";
 
-/* Cały stan aplikacji żyje w przeglądarce (localStorage). Nie ma serwera,
-   więc dane nie opuszczają urządzenia. Kopię robi się eksportem do pliku. */
+/* Stan aplikacji. Bez konta żyje w przeglądarce (localStorage).
+   Po zalogowaniu ekran zmienia się od razu, a zmiana idzie w tle do bazy
+   (kolejka w data/cloud.ts). Gdy zapis się nie uda, pojawia się komunikat,
+   a stan jest pobierany z bazy od nowa. */
+
+const sync = (op: Parameters<typeof enqueue>[0]) => {
+  if (!isCloud()) return;
+  void enqueue(op, (msg) => toast.error(`Nie zapisano zmiany. ${msg}`));
+};
+
+/* Stawki i suwaki kalkulatora zmieniają się przy każdym znaku i ruchu,
+   więc do bazy trafiają zbiorczo, chwilę po ostatniej zmianie. */
+let settingsTimer: number | undefined;
+const flushSettings = () => {
+  if (settingsTimer === undefined) return;
+  window.clearTimeout(settingsTimer);
+  settingsTimer = undefined;
+  const { params, scenario, demo } = useFleet.getState();
+  sync(() => api.saveSettings(params, scenario, demo));
+};
+const scheduleSettings = () => {
+  if (!isCloud()) return;
+  window.clearTimeout(settingsTimer);
+  settingsTimer = window.setTimeout(flushSettings, 700);
+};
+if (typeof document !== "undefined")
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushSettings();
+  });
+
+const replaceRemote = () => {
+  const { vehicles, drivers, entries, params, scenario, demo } = useFleet.getState();
+  window.clearTimeout(settingsTimer);
+  settingsTimer = undefined;
+  sync(() => api.replaceAll({ vehicles, drivers, entries }, params, scenario, demo));
+};
+
+/* Zalogowany użytkownik nie nadpisuje danych tej przeglądarki: po
+   wylogowaniu wracają takie, jakie były. */
+const localOnly = createJSONStorage(() => ({
+  getItem: (k: string) => localStorage.getItem(k),
+  setItem: (k: string, v: string) => {
+    if (!isCloud()) localStorage.setItem(k, v);
+  },
+  removeItem: (k: string) => localStorage.removeItem(k),
+}));
 
 interface FleetState extends FleetData {
   params: Params;
@@ -51,34 +98,68 @@ export const useFleet = create<FleetState>()(
       scenario: planScenario,
       demo: true,
 
-      saveVehicle: (v) => set((s) => ({ vehicles: upsert(s.vehicles, v) })),
-      removeVehicle: (id) =>
+      saveVehicle: (v) => {
+        set((s) => ({ vehicles: upsert(s.vehicles, v) }));
+        sync(() => api.upsertVehicle(v));
+      },
+      removeVehicle: (id) => {
         set((s) => ({
           vehicles: s.vehicles.filter((v) => v.id !== id),
           /* Kierowcy usuniętego auta zostają, tylko bez przypisania. */
           drivers: s.drivers.map((d) => (d.vehicleId === id ? { ...d, vehicleId: null } : d)),
-        })),
+        }));
+        sync(() => api.deleteVehicle(id));
+      },
 
-      saveDriver: (d) => set((s) => ({ drivers: upsert(s.drivers, d) })),
-      removeDriver: (id) =>
+      saveDriver: (d) => {
+        set((s) => ({ drivers: upsert(s.drivers, d) }));
+        sync(() => api.upsertDriver(d));
+      },
+      removeDriver: (id) => {
         set((s) => ({
           drivers: s.drivers.filter((d) => d.id !== id),
           entries: s.entries.filter((e) => e.driverId !== id),
-        })),
+        }));
+        sync(() => api.deleteDriver(id));
+      },
 
-      saveEntry: (e) => set((s) => ({ entries: upsert(s.entries, e) })),
-      removeEntry: (id) => set((s) => ({ entries: s.entries.filter((e) => e.id !== id) })),
-      setPaid: (ids, paid) =>
+      saveEntry: (e) => {
+        set((s) => ({ entries: upsert(s.entries, e) }));
+        sync(() => api.upsertEntry(e));
+      },
+      removeEntry: (id) => {
+        set((s) => ({ entries: s.entries.filter((e) => e.id !== id) }));
+        sync(() => api.deleteEntry(id));
+      },
+      setPaid: (ids, paid) => {
+        if (ids.length === 0) return;
         set((s) => ({
           entries: s.entries.map((e) => (ids.includes(e.id) ? { ...e, paid } : e)),
-        })),
+        }));
+        sync(() => api.setPaid(ids, paid));
+      },
 
-      setParams: (patch) => set((s) => ({ params: { ...s.params, ...patch } })),
-      resetParams: () => set({ params: defaultParams }),
-      setScenario: (patch) => set((s) => ({ scenario: { ...s.scenario, ...patch } })),
+      setParams: (patch) => {
+        set((s) => ({ params: { ...s.params, ...patch } }));
+        scheduleSettings();
+      },
+      resetParams: () => {
+        set({ params: defaultParams });
+        scheduleSettings();
+      },
+      setScenario: (patch) => {
+        set((s) => ({ scenario: { ...s.scenario, ...patch } }));
+        scheduleSettings();
+      },
 
-      loadDemo: () => set({ ...demoData(), demo: true }),
-      clearAll: () => set({ vehicles: [], drivers: [], entries: [], demo: false }),
+      loadDemo: () => {
+        set({ ...demoData(), demo: true });
+        replaceRemote();
+      },
+      clearAll: () => {
+        set({ vehicles: [], drivers: [], entries: [], demo: false });
+        replaceRemote();
+      },
 
       importData: (data) => {
         if (data === null || typeof data !== "object") return false;
@@ -100,12 +181,14 @@ export const useFleet = create<FleetState>()(
               : s.scenario,
           demo: false,
         }));
+        replaceRemote();
         return true;
       },
     }),
     {
       name: "postoj-v1",
       version: 1,
+      storage: localOnly,
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<FleetState>;
         return {

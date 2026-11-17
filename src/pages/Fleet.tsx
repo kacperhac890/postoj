@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { Car, Check, Plus } from "@phosphor-icons/react";
 import { vehicleMonthlyNet } from "../domain/engine";
 import { daysUntil, plural, shortDate, toIso, zl } from "../domain/format";
 import { MODE_LABEL, PREP_STEPS, STATUS_LABEL } from "../domain/labels";
 import type { Mode, Vehicle, VehicleStatus } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
+import { ListToolbar, NoMatches, fold } from "../ui/Filters";
 import { Sheet, useRetained } from "../ui/Sheet";
+import { toast } from "../ui/Toast";
 import {
   Badge,
   Button,
@@ -58,6 +61,18 @@ export function Deadline({ label, iso }: { label: string; iso: string }) {
   );
 }
 
+type Filter = "all" | "active" | "service" | "idle" | "attention";
+
+/** Auto wymaga uwagi: termin w ciągu 30 dni, nieukończone przygotowanie albo brak kierowcy. */
+function needsAttention(v: Vehicle, hasCrew: boolean) {
+  const soon = [v.inspectionDue, v.insuranceDue].some((iso) => {
+    const d = daysUntil(iso);
+    return d !== null && d <= 30;
+  });
+  const prep = PREP_STEPS.some((s) => !v.prep[s.key]);
+  return soon || prep || (v.status === "active" && !hasCrew);
+}
+
 const COLS = "md:grid-cols-[minmax(0,2fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1.6fr)]";
 
 export function Fleet() {
@@ -72,12 +87,46 @@ export function Fleet() {
   const isNew = shown ? !vehicles.some((v) => v.id === shown.id) : false;
   const patch = (p: Partial<Vehicle>) => setDraft((d) => (d ? { ...d, ...p } : d));
 
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+
+  const crewOf = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const d of drivers) {
+      if (!d.active || !d.vehicleId) continue;
+      map.set(d.vehicleId, [...(map.get(d.vehicleId) ?? []), d.name]);
+    }
+    return map;
+  }, [drivers]);
+
+  const counts = useMemo(() => {
+    const c = { all: vehicles.length, active: 0, service: 0, idle: 0, attention: 0 };
+    for (const v of vehicles) {
+      c[v.status] += 1;
+      if (needsAttention(v, crewOf.has(v.id))) c.attention += 1;
+    }
+    return c;
+  }, [vehicles, crewOf]);
+
+  const visible = useMemo(() => {
+    const q = fold(query);
+    return vehicles.filter((v) => {
+      if (filter === "attention" && !needsAttention(v, crewOf.has(v.id))) return false;
+      if (filter !== "all" && filter !== "attention" && v.status !== filter) return false;
+      if (!q) return true;
+      const hay = fold([v.plate, v.plate.replace(/\s/g, ""), v.model, String(v.year), ...(crewOf.get(v.id) ?? [])].join(" "));
+      return hay.includes(q);
+    });
+  }, [vehicles, query, filter, crewOf]);
+
   const rental = vehicles.filter((v) => v.mode === "rental").length;
   const monthly = vehicles.reduce((sum, v) => sum + vehicleMonthlyNet(v, params), 0);
 
   function save() {
     if (!draft || !draft.plate.trim()) return;
-    saveVehicle({ ...draft, plate: draft.plate.trim().toUpperCase(), model: draft.model.trim() });
+    const plate = draft.plate.trim().toUpperCase();
+    saveVehicle({ ...draft, plate, model: draft.model.trim() });
+    toast.ok(isNew ? `Dodano auto ${plate}.` : `Zapisano zmiany w ${plate}.`);
     setDraft(null);
   }
 
@@ -119,9 +168,25 @@ export function Fleet() {
           </Empty>
         ) : (
           <>
+            {vehicles.length > 3 ? (
+              <ListToolbar
+                query={query}
+                onQuery={setQuery}
+                placeholder="Rejestracja, model, kierowca"
+                value={filter}
+                onChange={setFilter}
+                chips={[
+                  { value: "all", label: "Wszystkie", count: counts.all },
+                  { value: "attention", label: "Wymaga uwagi", count: counts.attention, tone: "amber" },
+                  { value: "active", label: "Jeżdżą", count: counts.active },
+                  { value: "service", label: "W serwisie", count: counts.service },
+                  { value: "idle", label: "Postój", count: counts.idle },
+                ]}
+              />
+            ) : null}
             <div
               className={cn(
-                "hidden gap-4 border-b border-line px-5 py-2.5 text-[0.75rem] font-medium text-ink-3 md:grid",
+                "hidden gap-4 border-b border-line bg-bg/60 px-5 py-2.5 text-[0.75rem] font-medium text-ink-3 md:grid",
                 COLS,
               )}
             >
@@ -131,12 +196,24 @@ export function Fleet() {
               <span className="text-right">Koszt miesięczny</span>
               <span>Terminy i gotowość</span>
             </div>
+            {visible.length === 0 ? (
+              <NoMatches
+                onReset={() => {
+                  setQuery("");
+                  setFilter("all");
+                }}
+              />
+            ) : null}
             <ul>
-              {vehicles.map((v) => {
+              {visible.map((v, i) => {
                 const crew = drivers.filter((d) => d.vehicleId === v.id && d.active);
                 const done = PREP_STEPS.filter((s) => v.prep[s.key]).length;
                 return (
-                  <li key={v.id} className="border-b border-line last:border-b-0">
+                  <li
+                    key={v.id}
+                    className="stagger-item border-b border-line last:border-b-0"
+                    style={{ "--i": i } as CSSProperties}
+                  >
                     <button
                       type="button"
                       onClick={() => setDraft(v)}
@@ -212,6 +289,7 @@ export function Fleet() {
                 onClick={() => {
                   if (window.confirm(`Usunąć auto ${shown.plate}? Kierowcy zostaną bez przypisania.`)) {
                     removeVehicle(shown.id);
+                    toast.ok(`Usunięto auto ${shown.plate}.`);
                     setDraft(null);
                   }
                 }}

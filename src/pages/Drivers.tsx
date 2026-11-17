@@ -1,10 +1,13 @@
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { IdentificationCard, Plus } from "@phosphor-icons/react";
 import { num1, pct, plural, zl } from "../domain/format";
 import { MODE_LABEL, SHIFT_LABEL } from "../domain/labels";
 import type { Driver, Shift } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
+import { ListToolbar, NoMatches, fold } from "../ui/Filters";
 import { Sheet, useRetained } from "../ui/Sheet";
+import { toast } from "../ui/Toast";
 import {
   Badge,
   Button,
@@ -71,7 +74,25 @@ export function Drivers() {
     [drivers],
   );
 
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "active" | "benched" | "students" | "inactive">("all");
+
+  const visible = useMemo(() => {
+    const q = fold(query);
+    const plates = new Map(vehicles.map((v) => [v.id, v.plate]));
+    return sorted.filter((d) => {
+      if (filter === "active" && !d.active) return false;
+      if (filter === "benched" && !(d.active && !d.vehicleId)) return false;
+      if (filter === "students" && !(d.active && d.student)) return false;
+      if (filter === "inactive" && d.active) return false;
+      if (!q) return true;
+      const plate = d.vehicleId ? (plates.get(d.vehicleId) ?? "") : "";
+      return fold([d.name, d.phone, plate, plate.replace(/\s/g, "")].join(" ")).includes(q);
+    });
+  }, [sorted, vehicles, query, filter]);
+
   const active = drivers.filter((d) => d.active).length;
+  const benched = drivers.filter((d) => d.active && !d.vehicleId).length;
   const students = drivers.filter((d) => d.active && d.student).length;
   const entryCount = shown ? entries.filter((e) => e.driverId === shown.id).length : 0;
   const shownVehicle = shown ? vehicles.find((v) => v.id === shown.vehicleId) : undefined;
@@ -79,6 +100,7 @@ export function Drivers() {
   function save() {
     if (!draft || !draft.name.trim()) return;
     saveDriver({ ...draft, name: draft.name.trim(), phone: draft.phone.trim() });
+    toast.ok(isNew ? `Dodano kierowcę ${draft.name.trim()}.` : `Zapisano zmiany: ${draft.name.trim()}.`);
     setDraft(null);
   }
 
@@ -114,9 +136,25 @@ export function Drivers() {
           </Empty>
         ) : (
           <>
+            {drivers.length > 3 ? (
+              <ListToolbar
+                query={query}
+                onQuery={setQuery}
+                placeholder="Imię, telefon, rejestracja"
+                value={filter}
+                onChange={setFilter}
+                chips={[
+                  { value: "all", label: "Wszyscy", count: drivers.length },
+                  { value: "active", label: "Aktywni", count: active },
+                  { value: "benched", label: "Bez auta", count: benched, tone: "amber" },
+                  { value: "students", label: "Studenci", count: students },
+                  { value: "inactive", label: "Nieaktywni", count: drivers.length - active },
+                ]}
+              />
+            ) : null}
             <div
               className={cn(
-                "hidden gap-4 border-b border-line px-5 py-2.5 text-[0.75rem] font-medium text-ink-3 md:grid",
+                "hidden gap-4 border-b border-line bg-bg/60 px-5 py-2.5 text-[0.75rem] font-medium text-ink-3 md:grid",
                 COLS,
               )}
             >
@@ -125,14 +163,26 @@ export function Drivers() {
               <span className="text-right">Stawka na godzinę</span>
               <span className="text-right">Średnio na tydzień</span>
             </div>
+            {visible.length === 0 ? (
+              <NoMatches
+                onReset={() => {
+                  setQuery("");
+                  setFilter("all");
+                }}
+              />
+            ) : null}
             <ul>
-              {sorted.map((d) => {
+              {visible.map((d, i) => {
                 const vehicle = vehicles.find((v) => v.id === d.vehicleId);
                 const s = stats.get(d.id);
                 const perHour = s && s.hours > 0 ? s.revenue / s.hours : null;
                 const tripsPerWeek = s && s.weeks > 0 ? s.trips / s.weeks : null;
                 return (
-                  <li key={d.id} className="border-b border-line last:border-b-0">
+                  <li
+                    key={d.id}
+                    className="stagger-item border-b border-line last:border-b-0"
+                    style={{ "--i": i } as CSSProperties}
+                  >
                     <button
                       type="button"
                       onClick={() => setDraft(d)}
@@ -215,6 +265,7 @@ export function Drivers() {
                 onClick={() => {
                   if (window.confirm(`Usunąć kierowcę ${shown.name}?`)) {
                     removeDriver(shown.id);
+                    toast.ok(`Usunięto kierowcę ${shown.name}.`);
                     setDraft(null);
                   }
                 }}

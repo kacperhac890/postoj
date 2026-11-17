@@ -32,7 +32,12 @@ jobs:
 
       # Build używa ścieżek względnych (base: './') i HashRouter,
       # więc działa w podkatalogu /postoj/ bez BASE_PATH ani 404.html.
+      # Adres bazy i klucz publiczny z Settings -> Secrets and variables ->
+      # Actions -> Variables. Bez nich aplikacja buduje się w trybie lokalnym.
       - run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
 
       # Pages musi być włączone w ustawieniach repozytorium
       # (Settings -> Pages -> Source: GitHub Actions).

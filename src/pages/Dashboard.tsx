@@ -1,6 +1,18 @@
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, CalendarCheck, Car, CheckCircle, IdentificationCard, Receipt, Wrench } from "@phosphor-icons/react";
+import {
+  ArrowRight,
+  CalendarCheck,
+  Car,
+  CheckCircle,
+  IdentificationCard,
+  Receipt,
+  UploadSimple,
+  Wrench,
+} from "@phosphor-icons/react";
+import { readLocalCopy, useSession } from "../data/session";
+import { toast } from "../ui/Toast";
 import type { Icon } from "@phosphor-icons/react";
 import { RateTrack, WeekBars } from "../charts/charts";
 import { breakEvenRate, scenarioFromFleet, settle, weekResult } from "../domain/engine";
@@ -10,6 +22,7 @@ import { lastFullWeek, shiftWeek, weekNumber } from "../domain/week";
 import { useFleet } from "../store/useFleet";
 import { WeekSwitcher } from "../ui/WeekSwitcher";
 import { Button, Empty, PageHeader, Panel, cn } from "../ui/kit";
+import { Tween } from "../ui/motion";
 
 interface Task {
   icon: Icon;
@@ -26,6 +39,10 @@ export function Dashboard() {
   const params = useFleet((s) => s.params);
   const scenario = useFleet((s) => s.scenario);
   const loadDemo = useFleet((s) => s.loadDemo);
+  const importData = useFleet((s) => s.importData);
+  const mode = useSession((s) => s.mode);
+  /* Pierwsze logowanie: dane wpisane wcześniej bez konta można przenieść. */
+  const localCopy = useMemo(() => (mode === "cloud" ? readLocalCopy() : null), [mode]);
 
   const [week, setWeek] = useState(lastFullWeek);
 
@@ -162,7 +179,20 @@ export function Dashboard() {
                 >
                   Dodaj auto
                 </Link>
-                <Button onClick={loadDemo}>Wczytaj dane przykładowe</Button>
+                {localCopy ? (
+                  <Button
+                    onClick={() => {
+                      importData(localCopy);
+                      toast.ok("Dane z tej przeglądarki są teraz na Twoim koncie.");
+                    }}
+                  >
+                    <UploadSimple size={16} />
+                    Przenieś dane z tej przeglądarki
+                  </Button>
+                ) : null}
+                <Button variant="quiet" onClick={loadDemo}>
+                  Wczytaj dane przykładowe
+                </Button>
               </div>
             }
           >
@@ -186,6 +216,7 @@ export function Dashboard() {
   const working = vehicles.filter((v) => v.status === "active").length;
   const hoursPerCar = working > 0 ? r.hours / working : 0;
   const above = breakEven !== null && r.avgRate >= breakEven;
+  const urgent = tasks.filter((t) => t.tone === "red").length;
 
   return (
     <>
@@ -200,50 +231,124 @@ export function Dashboard() {
         <WeekSwitcher week={week} onChange={setWeek} />
       </PageHeader>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-        {/* Rachunek tygodnia: skąd bierze się wynik */}
-        <Panel title="Rachunek tygodnia" aside="kwoty netto">
-          <div className="flex flex-col">
-            {ledger.map((row) => (
-              <div
-                key={row.label}
-                className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 border-b border-line py-2.5 first:pt-0"
-              >
-                <div className="min-w-0">
-                  <span className="text-[0.9375rem] font-medium text-ink">{row.label}</span>
-                  <span className="ml-2 hidden text-[0.75rem] text-ink-3 sm:inline">{row.hint}</span>
+      {/* Na telefonie jedna kolumna w kolejności ważności: wynik, sprawy,
+          wskaźniki, trend. Na komputerze dwie kolumny. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start">
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
+          {/* Rachunek tygodnia: skąd bierze się wynik */}
+          <Panel title="Rachunek tygodnia" aside="kwoty netto" className="order-1 lg:order-none">
+            <div className="flex flex-col">
+              {ledger.map((row, i) => (
+                <div
+                  key={row.label}
+                  className="grid grid-cols-[1fr_auto] items-baseline gap-x-4 border-b border-line py-2.5 first:pt-0"
+                >
+                  <div className="min-w-0">
+                    <span className="text-[0.9375rem] font-medium text-ink">{row.label}</span>
+                    <span className="ml-2 hidden text-[0.75rem] text-ink-3 sm:inline">{row.hint}</span>
+                  </div>
+                  <span className="num text-[0.9375rem] font-medium text-ink">
+                    <Tween value={row.value} format={zl} />
+                  </span>
+                  <div className="col-span-2 mt-1.5 h-1.5 overflow-hidden rounded-full bg-sunken">
+                    <div
+                      className={cn("bar-grow h-full w-full rounded-full", row.kind === "in" ? "bg-green" : "bg-ink-3")}
+                      style={{ transform: `scaleX(${Math.min(1, Math.abs(row.value) / scale)})`, "--i": i } as CSSProperties}
+                    />
+                  </div>
                 </div>
-                <span className="num text-[0.9375rem] font-medium text-ink">{zl(row.value)}</span>
-                <div className="col-span-2 mt-1.5 h-1.5 rounded-full bg-sunken">
-                  <div
-                    className={cn("h-full rounded-full", row.kind === "in" ? "bg-green" : "bg-ink-3")}
-                    style={{ width: `${Math.min(100, (Math.abs(row.value) / scale) * 100)}%` }}
-                  />
-                </div>
+              ))}
+              <div className="flex items-baseline justify-between gap-4 pt-4">
+                <span className="text-[1rem] font-semibold text-ink">Wynik tygodnia</span>
+                <span
+                  className={cn(
+                    "num text-[1.875rem] leading-none font-semibold tracking-[-0.02em] transition-colors duration-300",
+                    r.result < 0 ? "text-red" : "text-green-ink",
+                  )}
+                >
+                  <Tween value={r.result} format={zl} ms={560} />
+                </span>
               </div>
-            ))}
-            <div className="flex items-baseline justify-between gap-4 pt-4">
-              <span className="text-[1rem] font-semibold text-ink">Wynik tygodnia</span>
-              <span
-                className={cn(
-                  "num text-[1.75rem] leading-none font-semibold tracking-[-0.02em]",
-                  r.result < 0 ? "text-red" : "text-green-ink",
-                )}
-              >
-                {zl(r.result)}
-              </span>
+              <p className="mt-2 text-[0.75rem] text-ink-3">
+                Przed CIT. Koszty miesięczne podzielone przez {num1(params.weeksPerMonth)} tygodnia.
+              </p>
             </div>
-            <p className="mt-2 text-[0.75rem] text-ink-3">
-              Przed CIT. Koszty miesięczne podzielone przez {num1(params.weeksPerMonth)} tygodnia.
-            </p>
-          </div>
-        </Panel>
+          </Panel>
 
-        <div className="flex flex-col gap-4">
-          <Panel title="Stawka na godzinę" aside="netto, po prowizji aplikacji">
+          <Panel title="Ostatnie osiem tygodni" aside="wynik przed CIT" className="order-5 lg:order-none">
+            <WeekBars items={trend} selected={week} onSelect={setWeek} />
+          </Panel>
+        </div>
+
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
+          <Panel
+            title="Do załatwienia"
+            aside={
+              tasks.length > 0 ? (
+                <span className={cn("num", urgent > 0 && "font-medium text-red")}>
+                  {urgent > 0 ? `${urgent} po terminie, ` : ""}
+                  {tasks.length} {plural(tasks.length, "sprawa", "sprawy", "spraw")}
+                </span>
+              ) : null
+            }
+            flush
+            className="order-2 lg:order-none"
+          >
+            {tasks.length === 0 ? (
+              <p className="flex items-center gap-2.5 px-4 py-5 text-[0.875rem] text-ink-2 md:px-5">
+                <CheckCircle size={18} weight="fill" className="text-green" />
+                Nic nie czeka. Rozliczenia zamknięte, terminy odległe.
+              </p>
+            ) : (
+              <ul>
+                {tasks.map((t, i) => (
+                  <li
+                    key={`${t.text}-${i}`}
+                    className="stagger-item border-b border-line last:border-b-0"
+                    style={{ "--i": i } as CSSProperties}
+                  >
+                    <Link
+                      to={t.to}
+                      className="group flex items-center gap-3 px-4 py-2.5 transition-colors duration-150 hover:bg-bg md:px-5"
+                    >
+                      <span
+                        className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-control",
+                          t.tone === "red"
+                            ? "bg-red-soft text-red"
+                            : t.tone === "amber"
+                              ? "bg-amber-soft text-amber"
+                              : "bg-sunken text-ink-2",
+                        )}
+                      >
+                        <t.icon size={17} />
+                      </span>
+                      <span className="min-w-0 flex-1 text-[0.875rem] text-ink">{t.text}</span>
+                      {t.detail ? (
+                        <span
+                          className={cn(
+                            "num shrink-0 text-[0.8125rem] font-medium",
+                            t.tone === "red" ? "text-red" : t.tone === "amber" ? "text-amber" : "text-ink",
+                          )}
+                        >
+                          {t.detail}
+                        </span>
+                      ) : null}
+                      <ArrowRight
+                        size={14}
+                        className="shrink-0 text-ink-3 transition-transform duration-200 ease-[var(--ease-out)] group-hover:translate-x-0.5"
+                      />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+
+          <Panel title="Stawka na godzinę" aside="netto, po prowizji" className="order-3 lg:order-none">
             <div className="flex items-baseline justify-between gap-3">
               <span className="num text-[1.75rem] leading-none font-semibold tracking-[-0.02em] text-ink">
-                {r.avgRate > 0 ? `${num1(r.avgRate)} zł` : "brak"}
+                {r.avgRate > 0 ? <Tween value={r.avgRate} format={(v) => `${num1(v)} zł`} /> : "brak"}
               </span>
               {r.avgRate > 0 && breakEven !== null ? (
                 <span className={cn("num text-[0.8125rem] font-medium", above ? "text-green-ink" : "text-red")}>
@@ -258,74 +363,32 @@ export function Dashboard() {
             </p>
           </Panel>
 
-          <Panel title="Godziny na auto" aside={`cel ${params.targetHoursPerCar} h tygodniowo`}>
+          <Panel
+            title="Godziny na auto"
+            aside={`cel ${params.targetHoursPerCar} h tygodniowo`}
+            className="order-4 lg:order-none"
+          >
             <div className="flex items-baseline justify-between gap-3">
               <span className="num text-[1.75rem] leading-none font-semibold tracking-[-0.02em] text-ink">
-                {num1(hoursPerCar)} h
+                <Tween value={hoursPerCar} format={(v) => `${num1(v)} h`} />
               </span>
-              <span className="num text-[0.8125rem] text-ink-2">
-                {pct(r.utilization)} wykorzystania aut, które jeżdżą
-              </span>
+              <span className="num text-[0.8125rem] text-ink-2">{pct(r.utilization)} wykorzystania</span>
             </div>
             <div
-              className="mt-4 h-2 rounded-full bg-sunken"
+              className="mt-4 h-2 overflow-hidden rounded-full bg-sunken"
               role="img"
               aria-label={`Wykorzystanie ${pct(r.utilization)}`}
             >
               <div
-                className="h-full rounded-full bg-green"
-                style={{ width: `${Math.min(100, r.utilization * 100)}%` }}
+                className="bar-grow h-full w-full rounded-full bg-green"
+                style={{ transform: `scaleX(${Math.min(1, r.utilization)})`, "--i": 3 } as CSSProperties}
               />
             </div>
+            <p className="mt-2.5 text-[0.75rem] text-ink-3">
+              Liczone dla {working} {plural(working, "auta, które jeździ", "aut, które jeżdżą", "aut, które jeżdżą")}.
+            </p>
           </Panel>
         </div>
-
-        <Panel title="Ostatnie osiem tygodni" aside="wynik przed CIT">
-          <WeekBars items={trend} selected={week} onSelect={setWeek} />
-        </Panel>
-
-        <Panel title="Do załatwienia" flush>
-          {tasks.length === 0 ? (
-            <p className="flex items-center gap-2.5 px-4 py-5 text-[0.875rem] text-ink-2 md:px-5">
-              <CheckCircle size={18} className="text-green" />
-              Nic nie czeka. Rozliczenia zamknięte, terminy odległe.
-            </p>
-          ) : (
-            <ul>
-              {tasks.map((t, i) => (
-                <li key={`${t.text}-${i}`} className="border-b border-line last:border-b-0">
-                  <Link
-                    to={t.to}
-                    className="group flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-bg md:px-5"
-                  >
-                    <t.icon
-                      size={18}
-                      className={cn(
-                        "shrink-0",
-                        t.tone === "red" ? "text-red" : t.tone === "amber" ? "text-amber" : "text-ink-3",
-                      )}
-                    />
-                    <span className="min-w-0 flex-1 text-[0.875rem] text-ink">{t.text}</span>
-                    {t.detail ? (
-                      <span
-                        className={cn(
-                          "num shrink-0 text-[0.8125rem] font-medium",
-                          t.tone === "red" ? "text-red" : t.tone === "amber" ? "text-amber" : "text-ink",
-                        )}
-                      >
-                        {t.detail}
-                      </span>
-                    ) : null}
-                    <ArrowRight
-                      size={14}
-                      className="shrink-0 text-ink-3 transition-transform duration-150 group-hover:translate-x-0.5"
-                    />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Panel>
       </div>
     </>
   );

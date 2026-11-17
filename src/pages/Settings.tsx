@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
-import { DownloadSimple, UploadSimple } from "@phosphor-icons/react";
+import { CloudCheck, DownloadSimple, HardDrives, SignIn, SignOut, UploadSimple } from "@phosphor-icons/react";
+import { cloudConfigured, describeError } from "../data/cloud";
+import { leaveGuest, setNewPassword, signOut, useSession } from "../data/session";
+import { toast } from "../ui/Toast";
+import { Spinner } from "../ui/motion";
 import { plural } from "../domain/format";
 import type { Params } from "../domain/types";
 import { exportSnapshot, useFleet } from "../store/useFleet";
-import { Button, Field, NumberInput, PageHeader, Panel, Toggle } from "../ui/kit";
+import { Button, Field, NumberInput, PageHeader, Panel, TextInput, Toggle } from "../ui/kit";
 
 export function Settings() {
   const params = useFleet((s) => s.params);
@@ -15,6 +19,7 @@ export function Settings() {
   const clearAll = useFleet((s) => s.clearAll);
   const importData = useFleet((s) => s.importData);
 
+  const mode = useSession((s) => s.mode);
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [vehicles, drivers, entries] = counts.split("/").map(Number);
@@ -73,6 +78,8 @@ export function Settings() {
       </PageHeader>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+        {cloudConfigured ? <AccountPanel /> : null}
+
         <Panel title="Kierowcy na procent">
           <div className="grid grid-cols-2 gap-3">
             {num("studentBase", "Student", "%", undefined, true)}
@@ -129,7 +136,10 @@ export function Settings() {
 
         <Panel title="Dane">
           <p className="text-[0.875rem] text-ink-2">
-            Wszystko zapisuje się w tej przeglądarce i nie jest nigdzie wysyłane. W aplikacji jest teraz{" "}
+            {mode === "cloud"
+              ? "Dane są zapisane na Twoim koncie w bazie i widać je na każdym urządzeniu po zalogowaniu. "
+              : "Wszystko zapisuje się w tej przeglądarce i nie jest nigdzie wysyłane. "}
+            W aplikacji jest teraz{" "}
             {vehicles} {plural(vehicles, "auto", "auta", "aut")}, {drivers}{" "}
             {plural(drivers, "kierowca", "kierowców", "kierowców")} i {entries}{" "}
             {plural(entries, "rozliczenie", "rozliczenia", "rozliczeń")}.
@@ -204,5 +214,130 @@ export function Settings() {
         </Panel>
       </div>
     </>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Konto
+   ------------------------------------------------------------------ */
+
+function AccountPanel() {
+  const mode = useSession((s) => s.mode);
+  const user = useSession((s) => s.user);
+  const pending = useSession((s) => s.pending);
+  const syncError = useSession((s) => s.syncError);
+  const [changing, setChanging] = useState(false);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (mode === "guest")
+    return (
+      <Panel title="Konto" className="lg:col-span-2">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control bg-sunken text-ink-2">
+              <HardDrives size={19} />
+            </span>
+            <p className="max-w-[60ch] text-[0.875rem] text-ink-2">
+              Korzystasz z aplikacji bez konta, dane są tylko w tej przeglądarce. Po zalogowaniu zapiszą się w bazie
+              i zobaczysz je na telefonie i komputerze. Przy pierwszym logowaniu przeniesiesz je jednym kliknięciem.
+            </p>
+          </div>
+          <Button variant="primary" onClick={leaveGuest}>
+            <SignIn size={16} />
+            Zaloguj się
+          </Button>
+        </div>
+      </Panel>
+    );
+
+  if (!user) return null;
+
+  async function save() {
+    setError(null);
+    if (password.length < 8) {
+      setError("Hasło musi mieć co najmniej 8 znaków.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await setNewPassword(password);
+      toast.ok("Hasło zmienione.");
+      setChanging(false);
+      setPassword("");
+    } catch (err) {
+      setError(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Panel title="Konto" className="lg:col-span-2">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-soft text-[0.9375rem] font-semibold text-green-ink">
+            {user.email.slice(0, 1).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate text-[0.9375rem] font-medium text-ink">{user.email}</div>
+            <div className="flex items-center gap-1.5 text-[0.8125rem] text-ink-3" aria-live="polite">
+              {syncError ? (
+                <span className="text-red">{syncError}</span>
+              ) : pending > 0 ? (
+                <>
+                  <Spinner className="h-3.5 w-3.5" />
+                  Zapisywanie zmian
+                </>
+              ) : (
+                <>
+                  <CloudCheck size={15} className="text-green" />
+                  Wszystko zapisane w bazie
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => setChanging((v) => !v)} aria-expanded={changing}>
+            Zmień hasło
+          </Button>
+          <Button variant="quiet" onClick={() => void signOut()}>
+            <SignOut size={16} />
+            Wyloguj
+          </Button>
+        </div>
+      </div>
+
+      {changing ? (
+        <form
+          className="enter mt-4 flex flex-col gap-3 border-t border-line pt-4 sm:flex-row sm:items-end"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <Field label="Nowe hasło" hint="Co najmniej 8 znaków." className="sm:w-72">
+            <TextInput
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+            />
+          </Field>
+          <Button type="submit" variant="primary" disabled={busy} className="sm:mb-[1.4rem]">
+            {busy ? <Spinner /> : null}
+            Zapisz hasło
+          </Button>
+          {error ? (
+            <p role="alert" className="text-[0.8125rem] text-red sm:mb-[1.9rem]">
+              {error}
+            </p>
+          ) : null}
+        </form>
+      ) : null}
+    </Panel>
   );
 }

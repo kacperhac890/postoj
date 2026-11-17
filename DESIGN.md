@@ -19,9 +19,23 @@ Scena: dzienne światło, telefon w ręce albo monitor w biurze. Jasny motyw, be
 - Bez kart w kartach. Panel to biała powierzchnia z linią 1 px.
 
 ## Ruch
-- 140 do 260 ms, krzywa cubic-bezier(0.23, 1, 0.32, 1). Tylko transform i opacity.
-- Ruch pokazuje stan (panel boczny, naciśnięcie), nie zdobi. Szanujemy prefers-reduced-motion.
+- 140 do 260 ms dla interakcji, do 640 ms dla wejścia wykresów. Krzywa cubic-bezier(0.23, 1, 0.32, 1). Tylko transform i opacity.
+- Ruch pokazuje stan albo zmianę, nie zdobi:
+  - nowy ekran wchodzi krótkim uniesieniem (`.page`), wiersze list jeden po drugim (`.stagger-item`, najwyżej 12 opóźnień);
+  - paski proporcji rosną od lewej i przy zmianie tygodnia dochodzą do nowej długości (`.bar-grow`, transform scaleX);
+  - słupki trendu rosną od linii zera (`.bar-rise`);
+  - kwoty na pulpicie i w rozliczeniach dochodzą do nowej wartości (`Tween`), startując od poprzedniej, nie od zera;
+  - wskaźnik aktywnej pozycji w nawigacji przesuwa się między pozycjami;
+  - komunikaty (toast) wchodzą od dołu i znikają same, błędy wiszą dłużej.
+- Treść jest widoczna także bez animacji. Przy prefers-reduced-motion czasy i opóźnienia spadają do zera.
 
 ## Układ
-- Komputer: stały panel boczny 232 px, treść do 1180 px.
+- Komputer (od 1024 px): panel boczny 240 px z kontem i stanem zapisu, treść do 1180 px.
+- Tablet (768 do 1023 px): wąska szyna 84 px z ikonami i podpisami, bez dolnej nawigacji.
 - Telefon: górny pasek, dolna nawigacja z pięcioma pozycjami, tabele zamieniają się w wiersze.
+- Pulpit na telefonie w kolejności ważności: wynik tygodnia, sprawy do załatwienia, stawka, godziny, trend.
+- Listy aut i kierowców mają wyszukiwanie i filtry z licznikami (od czterech pozycji).
+
+## Logowanie
+- Na komputerze lewa kolumna w ciemnej zieleni z przykładowym rachunkiem tygodnia zamiast ilustracji, po prawej formularz.
+- Na telefonie sam formularz. Pod formularzem wejście bez konta.

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { Check, Receipt } from "@phosphor-icons/react";
 import { settle } from "../domain/engine";
@@ -7,6 +8,8 @@ import type { Driver, Entry, Vehicle } from "../domain/types";
 import { lastFullWeek, weekNumber } from "../domain/week";
 import { newId, useFleet } from "../store/useFleet";
 import { Sheet, useRetained } from "../ui/Sheet";
+import { toast } from "../ui/Toast";
+import { Tween } from "../ui/motion";
 import { WeekSwitcher } from "../ui/WeekSwitcher";
 import { Badge, Button, Empty, Field, NumberInput, PageHeader, Panel, Plate, Row, cn } from "../ui/kit";
 
@@ -98,6 +101,7 @@ export function Settlements() {
   function save() {
     if (!draft) return;
     saveEntry(draft);
+    toast.ok("Rozliczenie zapisane.");
     setDraft(null);
   }
 
@@ -115,10 +119,18 @@ export function Settlements() {
       {lines.length > 0 ? (
         <dl className="mb-4 grid grid-cols-2 overflow-hidden rounded-panel border border-line bg-surface md:grid-cols-4">
           {[
-            { label: "Do wypłaty kierowcom", value: zl(totals.toPay), accent: totals.toPay > 0 },
-            { label: "Do pobrania od najemców", value: zl(totals.toCollect), accent: totals.toCollect > 0 },
-            { label: "Utarg z aplikacji", value: zl(totals.revenue), accent: false },
-            { label: "Zostaje po kierowcach i paliwie", value: zl(totals.margin), accent: false },
+            { label: "Do wypłaty kierowcom", value: <Tween value={totals.toPay} format={zl} />, accent: totals.toPay > 0 },
+            {
+              label: "Do pobrania od najemców",
+              value: <Tween value={totals.toCollect} format={zl} />,
+              accent: totals.toCollect > 0,
+            },
+            { label: "Utarg z aplikacji", value: <Tween value={totals.revenue} format={zl} />, accent: false },
+            {
+              label: "Zostaje po kierowcach i paliwie",
+              value: <Tween value={totals.margin} format={zl} />,
+              accent: false,
+            },
           ].map((item, i) => (
             <div
               key={item.label}
@@ -155,7 +167,14 @@ export function Settlements() {
                 </span>
               ) : null}
               {totals.unpaid.length > 0 ? (
-                <Button size="sm" onClick={() => setPaid(totals.unpaid, true)}>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const n = totals.unpaid.length;
+                    setPaid(totals.unpaid, true);
+                    toast.ok(`Oznaczono ${n} ${plural(n, "rozliczenie", "rozliczenia", "rozliczeń")} jako rozliczone.`);
+                  }}
+                >
                   <Check size={14} weight="bold" />
                   Rozlicz wszystkie
                 </Button>
@@ -200,14 +219,15 @@ export function Settlements() {
               <span className="text-right">Stan</span>
             </div>
             <ul>
-              {lines.map((l) => {
+              {lines.map((l, i) => {
                 const s = l.entry ? settle(l.entry, params) : null;
                 const rental = (l.entry?.mode ?? l.vehicle?.mode) === "rental";
                 return (
                   <li
                     key={l.driver.id}
+                    style={{ "--i": i } as CSSProperties}
                     className={cn(
-                      "grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 last:border-b-0 md:px-5",
+                      "stagger-item grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3 last:border-b-0 md:px-5",
                       COLS,
                     )}
                   >
@@ -260,13 +280,13 @@ export function Settlements() {
                             aria-label={`Rozliczone: ${l.driver.name}`}
                             onClick={() => setPaid([l.entry!.id], !l.entry!.paid)}
                             className={cn(
-                              "press inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium",
+                              "press inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium transition-colors duration-200",
                               l.entry.paid
                                 ? "border-green-line bg-green-soft text-green-ink"
                                 : "border-line-strong bg-surface text-ink-2 hover:bg-sunken",
                             )}
                           >
-                            {l.entry.paid ? <Check size={13} weight="bold" /> : null}
+                            {l.entry.paid ? <Check size={13} weight="bold" className="check-pop" /> : null}
                             {l.entry.paid ? "Rozliczone" : "Do rozliczenia"}
                           </button>
                         </span>

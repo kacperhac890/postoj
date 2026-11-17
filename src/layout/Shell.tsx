@@ -1,9 +1,25 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Calculator, Car, Gauge, GearSix, IdentificationCard, Receipt } from "@phosphor-icons/react";
+import {
+  ArrowClockwise,
+  Calculator,
+  Car,
+  CloudCheck,
+  CloudSlash,
+  Gauge,
+  GearSix,
+  IdentificationCard,
+  Receipt,
+  SignIn,
+  SignOut,
+} from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
+import { cloudConfigured } from "../data/cloud";
+import { leaveGuest, refreshAccount, signOut, useSession } from "../data/session";
 import { useFleet } from "../store/useFleet";
-import { cn } from "../ui/kit";
+import { Button, Panel, cn } from "../ui/kit";
+import { PageSkeleton, Spinner } from "../ui/motion";
+import { Mark } from "./Mark";
 
 const NAV: Array<{ to: string; label: string; icon: Icon }> = [
   { to: "/", label: "Pulpit", icon: Gauge },
@@ -13,21 +29,18 @@ const NAV: Array<{ to: string; label: string; icon: Icon }> = [
   { to: "/kalkulator", label: "Kalkulator", icon: Calculator },
 ];
 
-function Mark({ size = 28 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="8" className="fill-green-deep-2" />
-      <rect x="8" y="8" width="7" height="7" rx="1.5" className="fill-on-deep" />
-      <rect x="17" y="17" width="7" height="7" rx="1.5" className="fill-on-deep" />
-      <rect x="17" y="8" width="7" height="7" rx="1.5" fill="oklch(0.7 0.11 156)" />
-      <rect x="8" y="17" width="7" height="7" rx="1.5" fill="oklch(0.7 0.11 156)" />
-    </svg>
-  );
-}
+const navIndex = (pathname: string) => NAV.findIndex((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to)));
 
 export function Shell() {
   const demo = useFleet((s) => s.demo);
+  const phase = useSession((s) => s.phase);
+  const mode = useSession((s) => s.mode);
   const { pathname } = useLocation();
+  const active = navIndex(pathname);
+  /* Poza główną nawigacją (ustawienia) wskaźnik gaśnie w miejscu, zamiast jechać do góry. */
+  const last = useRef(0);
+  if (active >= 0) last.current = active;
+  const at = last.current;
 
   /* Nowy ekran zaczyna się od góry, bez animowanego przewijania. */
   useEffect(() => {
@@ -35,33 +48,42 @@ export function Shell() {
   }, [pathname]);
 
   return (
-    <div className="min-h-dvh lg:pl-[232px]">
-      {/* Panel boczny: komputer */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[232px] flex-col bg-green-deep px-3 py-4 lg:flex">
-        <Link to="/" className="flex items-center gap-2.5 rounded-control px-2 py-1.5">
+    <div className="min-h-dvh md:pl-[84px] lg:pl-[240px]">
+      {/* Panel boczny: szyna z ikonami na tablecie, pełny panel na komputerze */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[84px] flex-col bg-green-deep px-2.5 py-4 md:flex lg:w-[240px] lg:px-3">
+        <Link to="/" className="flex items-center gap-2.5 rounded-control px-2 py-1.5 max-lg:justify-center">
           <Mark />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-on-deep">Postój</span>
+          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-on-deep max-lg:hidden">Postój</span>
         </Link>
 
-        <nav aria-label="Główna nawigacja" className="mt-6 flex flex-col gap-0.5">
+        <nav aria-label="Główna nawigacja" className="relative mt-6 flex flex-col gap-1">
+          {/* Tło aktywnej pozycji jeździ między pozycjami zamiast przeskakiwać. */}
+          <span
+            aria-hidden="true"
+            className="nav-indicator absolute inset-x-0 top-0 h-14 rounded-control bg-green-deep-2 lg:h-10"
+            style={{
+              transform: `translateY(calc(${at} * (100% + 0.25rem)))`,
+              opacity: active < 0 ? 0 : 1,
+            }}
+          />
           {NAV.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
               end={to === "/"}
+              title={label}
               className={({ isActive }) =>
                 cn(
-                  "press flex h-10 items-center gap-3 rounded-control px-3 text-[0.9375rem] font-medium",
-                  isActive
-                    ? "bg-green-deep-2 text-white"
-                    : "text-on-deep-2 hover:bg-green-deep-2/60 hover:text-on-deep",
+                  "press relative flex items-center gap-3 rounded-control text-[0.9375rem] font-medium",
+                  "h-14 flex-col justify-center gap-1 px-1 text-[0.6875rem] lg:h-10 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-[0.9375rem]",
+                  isActive ? "text-white" : "text-on-deep-2 hover:text-on-deep",
                 )
               }
             >
               {({ isActive }) => (
                 <>
-                  <Icon size={19} weight={isActive ? "fill" : "regular"} />
-                  {label}
+                  <Icon size={19} weight={isActive ? "fill" : "regular"} className="shrink-0" />
+                  <span className="max-lg:leading-none">{label}</span>
                 </>
               )}
             </NavLink>
@@ -70,35 +92,37 @@ export function Shell() {
 
         <div className="mt-auto flex flex-col gap-2">
           {demo ? (
-            <p className="rounded-control border border-green-deep-2 px-3 py-2.5 text-[0.75rem] leading-snug text-on-deep-2">
+            <p className="rounded-control border border-green-deep-2 px-3 py-2.5 text-[0.75rem] leading-snug text-on-deep-2 max-lg:hidden">
               Oglądasz dane przykładowe. Usuniesz je w ustawieniach.
             </p>
           ) : null}
           <NavLink
             to="/ustawienia"
+            title="Ustawienia"
             className={({ isActive }) =>
               cn(
-                "press flex h-10 items-center gap-3 rounded-control px-3 text-[0.9375rem] font-medium",
-                isActive
-                  ? "bg-green-deep-2 text-white"
-                  : "text-on-deep-2 hover:bg-green-deep-2/60 hover:text-on-deep",
+                "press flex items-center rounded-control font-medium",
+                "h-14 flex-col justify-center gap-1 text-[0.6875rem] lg:h-10 lg:flex-row lg:justify-start lg:gap-3 lg:px-3 lg:text-[0.9375rem]",
+                isActive ? "bg-green-deep-2 text-white" : "text-on-deep-2 hover:bg-green-deep-2/60 hover:text-on-deep",
               )
             }
           >
-            <GearSix size={19} />
-            Ustawienia
+            <GearSix size={19} className="shrink-0" />
+            <span className="max-lg:leading-none">Ustawienia</span>
           </NavLink>
+          <Account />
         </div>
       </aside>
 
-      {/* Górny pasek: telefon i tablet */}
-      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-line bg-bg px-4 lg:hidden">
+      {/* Górny pasek: telefon */}
+      <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-line bg-bg/90 px-4 backdrop-blur-md md:hidden">
         <Link to="/" className="flex items-center gap-2.5">
           <Mark size={26} />
           <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-ink">Postój</span>
         </Link>
         <div className="flex items-center gap-1">
-          {demo ? (
+          <SyncDot />
+          {demo && mode !== "guest" ? (
             <Link
               to="/ustawienia"
               className="rounded-full bg-amber-soft px-2.5 py-1 text-[0.75rem] font-medium text-amber"
@@ -108,7 +132,7 @@ export function Shell() {
           ) : null}
           <NavLink
             to="/ustawienia"
-            aria-label="Ustawienia"
+            aria-label="Ustawienia i konto"
             className={({ isActive }) =>
               cn(
                 "press flex h-10 w-10 items-center justify-center rounded-control",
@@ -121,43 +145,183 @@ export function Shell() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1180px] px-4 pt-5 pb-28 md:px-8 md:pt-8 lg:pb-16">
-        <Outlet />
+      <main className="mx-auto w-full max-w-[1180px] px-4 pt-5 pb-28 md:px-8 md:pt-8 md:pb-16">
+        {phase === "loading" ? (
+          <PageSkeleton />
+        ) : phase === "error" ? (
+          <LoadError />
+        ) : (
+          <div key={pathname} className="page">
+            <Outlet />
+          </div>
+        )}
       </main>
 
-      {/* Dolna nawigacja: telefon i tablet */}
+      {/* Dolna nawigacja: telefon */}
       <nav
         aria-label="Główna nawigacja"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       >
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            className={({ isActive }) =>
-              cn(
-                "flex h-[3.75rem] flex-col items-center justify-center gap-1 text-[0.6875rem] font-medium",
-                isActive ? "text-green-ink" : "text-ink-3",
-              )
-            }
+        <div className="relative grid grid-cols-5">
+          <span
+            aria-hidden="true"
+            className="nav-indicator pointer-events-none absolute top-[0.6rem] left-0 flex w-1/5 justify-center"
+            style={{ transform: `translateX(${at * 100}%)`, opacity: active < 0 ? 0 : 1 }}
           >
-            {({ isActive }) => (
-              <>
-                <span
-                  className={cn(
-                    "flex h-7 w-12 items-center justify-center rounded-full transition-colors duration-150",
-                    isActive ? "bg-green-soft" : undefined,
-                  )}
-                >
-                  <Icon size={21} weight={isActive ? "fill" : "regular"} />
-                </span>
-                {label}
-              </>
-            )}
-          </NavLink>
-        ))}
+            <span className="h-7 w-12 rounded-full bg-green-soft" />
+          </span>
+          {NAV.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === "/"}
+              className={({ isActive }) =>
+                cn(
+                  "press relative flex h-[3.75rem] flex-col items-center justify-center gap-1 text-[0.6875rem] font-medium transition-colors duration-150",
+                  isActive ? "text-green-ink" : "text-ink-3",
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <span className="flex h-7 w-12 items-center justify-center">
+                    <Icon size={21} weight={isActive ? "fill" : "regular"} />
+                  </span>
+                  {label}
+                </>
+              )}
+            </NavLink>
+          ))}
+        </div>
       </nav>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Konto i stan zapisu
+   ------------------------------------------------------------------ */
+
+function Account() {
+  const mode = useSession((s) => s.mode);
+  const user = useSession((s) => s.user);
+  const pending = useSession((s) => s.pending);
+  const syncError = useSession((s) => s.syncError);
+
+  if (!cloudConfigured) return null;
+
+  if (mode === "guest")
+    return (
+      <button
+        type="button"
+        onClick={leaveGuest}
+        title="Zaloguj się"
+        className="press flex h-14 flex-col items-center justify-center gap-1 rounded-control bg-green text-[0.6875rem] font-medium text-white hover:bg-green-hover lg:h-10 lg:flex-row lg:gap-2 lg:text-[0.875rem]"
+      >
+        <SignIn size={18} />
+        <span className="max-lg:leading-none">Zaloguj się</span>
+      </button>
+    );
+
+  if (!user) return null;
+  const initial = user.email.slice(0, 1).toUpperCase() || "?";
+
+  return (
+    <div className="flex items-center gap-2.5 border-t border-green-deep-2 pt-3 max-lg:flex-col lg:px-1">
+      <span
+        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-deep-2 text-[0.8125rem] font-semibold text-on-deep"
+        title={user.email}
+      >
+        {initial}
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full border-2 border-green-deep transition-colors duration-200",
+            syncError ? "bg-[oklch(0.7_0.15_35)]" : pending > 0 ? "bg-[oklch(0.82_0.12_86)]" : "bg-[oklch(0.75_0.13_156)]",
+          )}
+        />
+      </span>
+      <div className="min-w-0 flex-1 max-lg:hidden">
+        <div className="truncate text-[0.8125rem] font-medium text-on-deep">{user.email}</div>
+        <div className="flex items-center gap-1 text-[0.6875rem] text-on-deep-2" aria-live="polite">
+          {syncError ? "Błąd zapisu" : pending > 0 ? "Zapisywanie…" : "Zapisane w bazie"}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => void signOut()}
+        aria-label="Wyloguj"
+        title="Wyloguj"
+        className="press flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-on-deep-2 hover:bg-green-deep-2 hover:text-on-deep"
+      >
+        <SignOut size={17} />
+      </button>
+    </div>
+  );
+}
+
+/** Stan zapisu na telefonie: widoczny tylko, gdy coś się dzieje. */
+function SyncDot() {
+  const mode = useSession((s) => s.mode);
+  const pending = useSession((s) => s.pending);
+  const syncError = useSession((s) => s.syncError);
+
+  if (mode === "guest")
+    return (
+      <button
+        type="button"
+        onClick={leaveGuest}
+        className="press mr-1 flex h-8 items-center gap-1.5 rounded-full bg-green px-3 text-[0.75rem] font-medium text-white"
+      >
+        <SignIn size={14} />
+        Zaloguj
+      </button>
+    );
+  if (!cloudConfigured || mode !== "cloud") return null;
+  if (syncError)
+    return (
+      <span className="flex h-10 w-10 items-center justify-center text-red" title={syncError}>
+        <CloudSlash size={19} />
+        <span className="sr-only">Błąd zapisu</span>
+      </span>
+    );
+  if (pending > 0)
+    return (
+      <span className="flex h-10 w-10 items-center justify-center text-ink-3" title="Zapisywanie">
+        <Spinner />
+        <span className="sr-only">Zapisywanie</span>
+      </span>
+    );
+  return (
+    <span className="enter flex h-10 w-8 items-center justify-center text-green" title="Zapisane w bazie">
+      <CloudCheck size={19} />
+      <span className="sr-only">Zapisane w bazie</span>
+    </span>
+  );
+}
+
+function LoadError() {
+  const message = useSession((s) => s.loadError);
+  return (
+    <Panel className="enter mx-auto max-w-[520px]">
+      <div className="flex flex-col items-start gap-3 py-2">
+        <span className="flex h-10 w-10 items-center justify-center rounded-control bg-red-soft text-red">
+          <CloudSlash size={20} />
+        </span>
+        <div>
+          <h1 className="text-[1.0625rem] font-semibold text-ink">Nie udało się wczytać danych</h1>
+          <p className="mt-1 text-[0.875rem] text-ink-2">{message}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => void refreshAccount(false)}>
+            <ArrowClockwise size={16} />
+            Spróbuj ponownie
+          </Button>
+          <Button variant="quiet" onClick={() => void signOut()}>
+            Wyloguj
+          </Button>
+        </div>
+      </div>
+    </Panel>
   );
 }
