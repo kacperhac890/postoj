@@ -1,4 +1,4 @@
-# Postój: zasady wyglądu
+# FlotBase: zasady wyglądu
 
 Scena: dzienne światło, telefon w ręce albo monitor w biurze. Jasny motyw, bez trybu ciemnego.
 

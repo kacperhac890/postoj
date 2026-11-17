@@ -104,7 +104,7 @@ export function Shell() {
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[84px] flex-col bg-green-deep px-2.5 py-4 md:flex lg:w-[240px] lg:px-3">
         <Link to="/" className="flex items-center gap-2.5 rounded-control px-2 py-1.5 max-lg:justify-center">
           <Mark />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-on-deep max-lg:hidden">Postój</span>
+          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-on-deep max-lg:hidden">FlotBase</span>
         </Link>
 
         <nav aria-label="Główna nawigacja" className="relative mt-6 flex flex-col gap-1">
@@ -172,7 +172,7 @@ export function Shell() {
       <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-line bg-bg/90 px-4 backdrop-blur-md md:hidden">
         <Link to="/" className="flex items-center gap-2.5">
           <Mark size={26} />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-ink">Postój</span>
+          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-ink">FlotBase</span>
         </Link>
         <div className="flex items-center gap-1">
           <SyncDot />

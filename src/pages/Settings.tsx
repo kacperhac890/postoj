@@ -42,7 +42,7 @@ export function Settings() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `postoj-kopia-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `flotbase-kopia-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setMessage({ ok: true, text: "Kopia zapisana do pliku." });

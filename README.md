@@ -1,7 +1,10 @@
-# Postój
+# FlotBase
 
 Aplikacja do prowadzenia floty taxi pracującej w aplikacjach: auta, kierowcy,
 tygodniowe rozliczenia i model finansowy spółki.
+
+Nazwa techniczna (repozytorium, tabele i funkcje w bazie `postoj_*`, klucze w przeglądarce `postoj-*`)
+zostaje `postoj`, żeby nie ruszać danych. FlotBase to nazwa widoczna dla użytkownika.
 
 ## Uruchomienie
 

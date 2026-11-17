@@ -67,7 +67,7 @@ function App() {
 }
 
 if (framed) {
-  document.getElementById("root")!.textContent = "Otwórz Postój w osobnej karcie przeglądarki.";
+  document.getElementById("root")!.textContent = "Otwórz FlotBase w osobnej karcie przeglądarki.";
 } else {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

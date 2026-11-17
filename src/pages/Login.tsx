@@ -21,7 +21,7 @@ const TITLES: Record<View, { title: string; lead: string }> = {
   confirm: { title: "Potwierdź adres", lead: "" },
   "new-password": { title: "Ustaw nowe hasło", lead: "Wpisz hasło, którym będziesz się logować od teraz." },
   welcome: {
-    title: "Witaj w Postoju",
+    title: "Witaj w FlotBase",
     lead: "Szef floty założył Ci konto. Ustaw hasło, a zobaczysz swój grafik i rozliczenia.",
   },
 };
@@ -104,7 +104,7 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
       <main className="flex min-h-dvh flex-col px-5 py-6 sm:px-8 lg:min-h-0 lg:py-10">
         <div className="flex items-center gap-2.5 lg:hidden">
           <Mark size={28} />
-          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-ink">Postój</span>
+          <span className="text-[1.0625rem] font-semibold tracking-[-0.01em] text-ink">FlotBase</span>
         </div>
 
         <div className="mx-auto flex w-full max-w-[380px] flex-1 flex-col justify-center py-10">
@@ -279,7 +279,7 @@ function Showcase() {
     <aside className="relative hidden overflow-hidden bg-green-deep text-on-deep lg:flex lg:flex-col lg:justify-between lg:p-10 xl:p-14">
       <div className="flex items-center gap-2.5">
         <Mark size={30} />
-        <span className="text-[1.125rem] font-semibold tracking-[-0.01em]">Postój</span>
+        <span className="text-[1.125rem] font-semibold tracking-[-0.01em]">FlotBase</span>
       </div>
 
       <div className="max-w-[440px]">
