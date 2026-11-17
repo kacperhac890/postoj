@@ -7,7 +7,17 @@ import type { FleetData } from "../domain/seed";
 import type { Params } from "../domain/types";
 import { useFleet } from "../store/useFleet";
 import { toast } from "../ui/Toast";
-import { cloudConfigured, describeError, fetchSnapshot, onQueueChange, queueIdle, supabase } from "./cloud";
+import {
+  ADMIN_EMAIL,
+  cloudConfigured,
+  describeError,
+  fetchDriverSnapshot,
+  fetchSnapshot,
+  onQueueChange,
+  queueIdle,
+  supabase,
+} from "./cloud";
+import type { DriverSnapshot } from "./cloud";
 import { setCloud } from "./mode";
 
 /* Sesja i źródło danych.
@@ -18,10 +28,18 @@ import { setCloud } from "./mode";
 export type Mode = "local" | "guest" | "cloud";
 export type Phase = "booting" | "signed-out" | "loading" | "ready" | "error";
 
+/* admin:    pełny dostęp, zarządza flotą (tryb bez bazy i bez konta też).
+   driver:   kierowca, tylko podgląd floty, grafiku i własnych rozliczeń.
+   unlinked: zalogowany, ale żadna karta kierowcy nie ma jego adresu. */
+export type Role = "admin" | "driver" | "unlinked";
+
 interface SessionState {
   mode: Mode;
   phase: Phase;
   user: { id: string; email: string } | null;
+  role: Role;
+  /** Karta kierowcy zalogowanego konta (rola driver). */
+  meId: string | null;
   /** Użytkownik wszedł z linku do zmiany hasła. */
   recovery: boolean;
   loadError: string | null;
@@ -34,6 +52,8 @@ export const useSession = create<SessionState>(() => ({
   mode: cloudConfigured ? "cloud" : "local",
   phase: cloudConfigured ? "booting" : "ready",
   user: null,
+  role: "admin",
+  meId: null,
   recovery: false,
   loadError: null,
   pending: 0,
@@ -60,6 +80,37 @@ const writeGuest = (on: boolean) => {
 };
 
 let currentUser: string | null = null;
+let currentRole: Role = "admin";
+
+const roleFor = (email: string | undefined): Role =>
+  (email ?? "").trim().toLowerCase() === ADMIN_EMAIL ? "admin" : "driver";
+
+function applyDriverSnapshot(s: DriverSnapshot) {
+  useFleet.setState({
+    vehicles: s.vehicles,
+    drivers: s.drivers,
+    entries: s.entries,
+    schedule: s.schedule,
+    params: { ...defaultParams, ...(s.params ?? {}) },
+    scenario: planScenario,
+    demo: false,
+  });
+  lastFetch = Date.now();
+  useSession.setState({ role: s.me ? "driver" : "unlinked", meId: s.me?.id ?? null });
+}
+
+/** Pobiera dane właściwe dla roli zalogowanego konta. */
+async function fetchFor(role: Role) {
+  if (role === "admin") {
+    const snap = await fetchSnapshot();
+    return () => {
+      applySnapshot(snap);
+      useSession.setState({ role: "admin", meId: null });
+    };
+  }
+  const snap = await fetchDriverSnapshot();
+  return () => applyDriverSnapshot(snap);
+}
 let lastFetch = 0;
 let reconcileAfterError = false;
 
@@ -68,6 +119,7 @@ function applySnapshot(s: Awaited<ReturnType<typeof fetchSnapshot>>) {
     vehicles: s.vehicles,
     drivers: s.drivers,
     entries: s.entries,
+    schedule: s.schedule,
     params: { ...defaultParams, ...(s.params ?? {}) },
     scenario: { ...planScenario, ...(s.scenario ?? {}) },
     demo: s.demo,
@@ -77,18 +129,20 @@ function applySnapshot(s: Awaited<ReturnType<typeof fetchSnapshot>>) {
 
 async function loadAccount(session: Session) {
   currentUser = session.user.id;
+  currentRole = roleFor(session.user.email);
   /* Od tej chwili zmiany nie nadpisują danych zapisanych w przeglądarce. */
   setCloud(true);
   useSession.setState({
     mode: "cloud",
     phase: "loading",
     loadError: null,
+    role: currentRole,
     user: { id: session.user.id, email: session.user.email ?? "" },
   });
   try {
-    const snap = await fetchSnapshot();
+    const apply = await fetchFor(currentRole);
     if (currentUser !== session.user.id) return;
-    applySnapshot(snap);
+    apply();
     useSession.setState({ phase: "ready" });
   } catch (err) {
     if (currentUser !== session.user.id) return;
@@ -98,6 +152,7 @@ async function loadAccount(session: Session) {
 
 function toSignedOut() {
   currentUser = null;
+  currentRole = "admin";
   setCloud(false);
   /* Wracają dane zapisane w tej przeglądarce sprzed zalogowania. */
   void useFleet.persist.rehydrate();
@@ -106,6 +161,8 @@ function toSignedOut() {
     mode: guest ? "guest" : "cloud",
     phase: guest ? "ready" : "signed-out",
     user: null,
+    role: "admin",
+    meId: null,
     recovery: false,
     loadError: null,
   });
@@ -119,9 +176,9 @@ export async function refreshAccount(silent = true) {
   const user = currentUser;
   if (!silent) useSession.setState({ phase: "loading", loadError: null });
   try {
-    const snap = await fetchSnapshot();
+    const apply = await fetchFor(currentRole);
     if (currentUser !== user || !queueIdle()) return;
-    applySnapshot(snap);
+    apply();
     useSession.setState({ phase: "ready", loadError: null });
   } catch (err) {
     if (!silent) useSession.setState({ phase: "error", loadError: describeError(err) });
@@ -216,7 +273,7 @@ export async function signOut() {
 export function continueAsGuest() {
   writeGuest(true);
   setCloud(false);
-  useSession.setState({ mode: "guest", phase: "ready" });
+  useSession.setState({ mode: "guest", phase: "ready", role: "admin", meId: null });
 }
 
 export function leaveGuest() {
@@ -246,6 +303,7 @@ export function readLocalCopy(): LocalCopy | null {
       vehicles: s.vehicles,
       drivers: s.drivers.map(normDriver),
       entries: s.entries.map(normEntry),
+      schedule: Array.isArray(s.schedule) ? s.schedule : [],
       params: { ...defaultParams, ...(s.params ?? {}) },
       scenario: { ...planScenario, ...(s.scenario ?? {}) },
     };

@@ -12,7 +12,10 @@ type View = "sign-in" | "sign-up" | "reset" | "sent" | "confirm" | "new-password
 
 const TITLES: Record<View, { title: string; lead: string }> = {
   "sign-in": { title: "Zaloguj się", lead: "Auta, kierowcy i rozliczenia czekają na Twoim koncie." },
-  "sign-up": { title: "Załóż konto", lead: "Dane floty zapiszą się w bazie i będą dostępne na każdym urządzeniu." },
+  "sign-up": {
+    title: "Załóż konto",
+    lead: "Kierowco, użyj adresu e-mail, który podałeś szefowi floty. Po zalogowaniu zobaczysz grafik i swoje rozliczenia.",
+  },
   reset: { title: "Nie pamiętasz hasła?", lead: "Wyślemy link, którym ustawisz nowe hasło." },
   sent: { title: "Sprawdź skrzynkę", lead: "" },
   confirm: { title: "Potwierdź adres", lead: "" },

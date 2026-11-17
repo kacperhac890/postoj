@@ -5,7 +5,10 @@ import { Check, Receipt } from "@phosphor-icons/react";
 import { fuelNet, settle } from "../domain/engine";
 import { num1, pct, plural, zl, zlExact } from "../domain/format";
 import type { Driver, Entry, Vehicle } from "../domain/types";
+import { driverWeeks } from "../domain/schedule";
 import { lastFullWeek, weekNumber } from "../domain/week";
+import { useSession } from "../data/session";
+import { MySettlements } from "./MySettlements";
 import { newId, useFleet } from "../store/useFleet";
 import { Sheet, useRetained } from "../ui/Sheet";
 import { toast } from "../ui/Toast";
@@ -22,6 +25,7 @@ import {
   Panel,
   Plate,
   Row,
+  Select,
   Toggle,
   cn,
 } from "../ui/kit";
@@ -33,10 +37,20 @@ interface Line {
   driver: Driver;
   vehicle: Vehicle | undefined;
   entry: Entry | undefined;
+  /** Liczba zmian w grafiku w tym tygodniu. */
+  shifts: number;
 }
 
 export function Settlements() {
+  const role = useSession((s) => s.role);
+  /* Konto kierowcy widzi wyłącznie własne rozliczenia, bez kwot spółki. */
+  if (role !== "admin") return <MySettlements />;
+  return <FleetSettlements />;
+}
+
+function FleetSettlements() {
   const drivers = useFleet((s) => s.drivers);
+  const schedule = useFleet((s) => s.schedule);
   const vehicles = useFleet((s) => s.vehicles);
   const entries = useFleet((s) => s.entries);
   const params = useFleet((s) => s.params);
@@ -48,17 +62,22 @@ export function Settlements() {
   const [draft, setDraft] = useState<Entry | null>(null);
   const shown = useRetained(draft);
 
-  /* W tygodniu pokazujemy aktywnych kierowców z autem oraz każdego,
-     kto ma już w nim rozliczenie, nawet jeśli potem odszedł. */
+  /* Zmiany z grafiku w tym tygodniu: kto jeździł i na czym najczęściej. */
+  const worked = useMemo(() => driverWeeks(schedule, week), [schedule, week]);
+  const [extra, setExtra] = useState<string[]>([]);
+
+  /* W tygodniu pokazujemy kierowców, którzy mieli zmiany w grafiku, każdego
+     z wpisanym rozliczeniem (nawet jeśli potem odszedł) i dodanych ręcznie. */
   const lines = useMemo<Line[]>(() => {
     const inWeek = entries.filter((e) => e.week === week);
     return drivers
       .map((driver) => {
         const entry = inWeek.find((e) => e.driverId === driver.id);
-        const vehicle = vehicles.find((v) => v.id === (entry?.vehicleId ?? driver.vehicleId));
-        return { driver, vehicle, entry };
+        const main = worked.get(driver.id)?.cars[0]?.vehicleId;
+        const vehicle = vehicles.find((v) => v.id === (entry?.vehicleId ?? main));
+        return { driver, vehicle, entry, shifts: worked.get(driver.id)?.total ?? 0 };
       })
-      .filter((l) => l.entry || (l.driver.active && l.vehicle))
+      .filter((l) => l.entry || l.shifts > 0 || extra.includes(`${week}:${l.driver.id}`))
       .sort(
         (a, b) =>
           (a.vehicle?.plate ?? "").localeCompare(b.vehicle?.plate ?? "") ||
@@ -99,15 +118,17 @@ export function Settlements() {
       setDraft(l.entry);
       return;
     }
-    if (!l.vehicle) return;
+    /* Auto z grafiku, a bez grafiku pierwsze jeżdżące. Można je zmienić w formularzu. */
+    const car = l.vehicle ?? vehicles.find((v) => v.status === "active") ?? vehicles[0];
+    if (!car) return;
     setDraft({
       id: newId(),
       driverId: l.driver.id,
       week,
-      mode: l.vehicle.mode,
+      mode: car.mode,
       student: l.driver.student,
       owner: l.driver.owner,
-      vehicleId: l.vehicle.id,
+      vehicleId: car.id,
       fuelGross: null,
       revenue: 0,
       hours: 0,
@@ -210,21 +231,19 @@ export function Settlements() {
         {lines.length === 0 ? (
           <Empty
             icon={<Receipt size={20} />}
-            title={noFleet ? "Najpierw dodaj auto i kierowcę" : "W tym tygodniu nie ma kogo rozliczać"}
+            title={noFleet ? "Najpierw dodaj auto i kierowcę" : "W tym tygodniu nikt nie ma zmian w grafiku"}
             action={
-              noFleet ? (
-                <Link
-                  to={vehicles.length === 0 ? "/flota" : "/kierowcy"}
-                  className="press inline-flex h-10 items-center rounded-control bg-green px-4 text-[0.9375rem] font-medium text-white hover:bg-green-hover"
-                >
-                  {vehicles.length === 0 ? "Przejdź do floty" : "Przejdź do kierowców"}
-                </Link>
-              ) : undefined
+              <Link
+                to={noFleet ? (vehicles.length === 0 ? "/flota" : "/kierowcy") : "/grafik"}
+                className="press inline-flex h-10 items-center rounded-control bg-green px-4 text-[0.9375rem] font-medium text-white hover:bg-green-hover"
+              >
+                {noFleet ? (vehicles.length === 0 ? "Przejdź do floty" : "Przejdź do kierowców") : "Otwórz grafik"}
+              </Link>
             }
           >
             {noFleet
-              ? "Rozliczenie tygodnia powstaje dla każdego aktywnego kierowcy, który ma przypisane auto."
-              : "Przypisz kierowcom auta, a pojawią się tutaj co tydzień."}
+              ? "Rozliczenie tygodnia powstaje dla każdego kierowcy, który ma zmiany w grafiku."
+              : "Rozliczenie powstaje dla każdego, kto ma w tym tygodniu zmiany w grafiku. Kierowcę spoza grafiku dodasz poniżej."}
           </Empty>
         ) : (
           <>
@@ -266,6 +285,11 @@ export function Settlements() {
                       {l.vehicle ? <Plate>{l.vehicle.plate}</Plate> : null}
                       {rental && !s?.ownerDrive ? <Badge>Wynajem</Badge> : null}
                       {(l.entry ? l.entry.owner : l.driver.owner) ? <Badge tone="green">Właściciel</Badge> : null}
+                      {l.shifts > 0 ? (
+                        <span className="num text-[0.75rem] text-ink-3">
+                          {l.shifts} {plural(l.shifts, "zmiana", "zmiany", "zmian")}
+                        </span>
+                      ) : null}
                       {s?.reached ? <Badge tone="green">Próg kursów</Badge> : null}
                     </button>
 
@@ -346,6 +370,37 @@ export function Settlements() {
         )}
       </Panel>
 
+      {(() => {
+        const others = drivers
+          .filter((d) => d.active && !lines.some((l) => l.driver.id === d.id))
+          .sort((a, b) => a.name.localeCompare(b.name, "pl"));
+        if (others.length === 0 || vehicles.length === 0) return null;
+        return (
+          <label className="mt-3 flex flex-wrap items-center gap-2 text-[0.8125rem] text-ink-2">
+            <span>Rozliczenie kierowcy spoza grafiku:</span>
+            <span className="w-56">
+              <Select
+                value=""
+                onChange={(e) => {
+                  const d = drivers.find((x) => x.id === e.target.value);
+                  if (!d) return;
+                  setExtra((x) => [...x, `${week}:${d.id}`]);
+                  open({ driver: d, vehicle: undefined, entry: undefined, shifts: 0 });
+                }}
+                className="h-9"
+              >
+                <option value="">wybierz kierowcę</option>
+                {others.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </Select>
+            </span>
+          </label>
+        );
+      })()}
+
       <Sheet
         open={draft !== null}
         onClose={() => setDraft(null)}
@@ -377,7 +432,6 @@ export function Settlements() {
         {shown && preview ? (
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap items-center gap-2 text-[0.8125rem] text-ink-2">
-              {shownVehicle ? <Plate>{shownVehicle.plate}</Plate> : null}
               <Badge>{shown.mode === "rental" ? "Wynajem" : "Na procent"}</Badge>
               {shown.mode === "commission" && !shown.owner ? (
                 <Badge tone={shown.student ? "green" : "neutral"}>
@@ -385,6 +439,33 @@ export function Settlements() {
                 </Badge>
               ) : null}
             </div>
+
+            <Field
+              label="Auto w tym tygodniu"
+              hint={
+                shownDriver && worked.get(shownDriver.id)
+                  ? `Z grafiku: ${worked
+                      .get(shownDriver.id)!
+                      .cars.map((c) => `${vehicles.find((v) => v.id === c.vehicleId)?.plate ?? "?"} (${c.count})`)
+                      .join(", ")}. Sposób rozliczenia wynika z auta.`
+                  : "Sposób rozliczenia (procent albo wynajem) wynika z auta."
+              }
+            >
+              <Select
+                value={shown.vehicleId ?? ""}
+                onChange={(e) => {
+                  const car = vehicles.find((v) => v.id === e.target.value);
+                  if (car) patch({ vehicleId: car.id, mode: car.mode });
+                }}
+              >
+                {!shownVehicle && shown.vehicleId ? <option value={shown.vehicleId}>Usunięte auto</option> : null}
+                {vehicles.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.plate} · {v.mode === "rental" ? "wynajem" : "na procent"}
+                  </option>
+                ))}
+              </Select>
+            </Field>
 
             <Field label="Utarg netto z aplikacji" hint="Po prowizji aplikacji, bez napiwków.">
               <NumberInput value={shown.revenue} onChange={(revenue) => patch({ revenue })} suffix="zł" autoFocus />

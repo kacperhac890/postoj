@@ -7,7 +7,8 @@ import type { Scenario } from "../domain/engine";
 import { normDriver, normEntry } from "../domain/normalize";
 import { demoData } from "../domain/seed";
 import type { FleetData } from "../domain/seed";
-import type { Driver, Entry, Params, Vehicle } from "../domain/types";
+import { inWeek, keyOf, slotKey, weekDates } from "../domain/schedule";
+import type { Assignment, Driver, Duty, Entry, Params, Vehicle } from "../domain/types";
 import { toast } from "../ui/Toast";
 
 /* Stan aplikacji. Bez konta żyje w przeglądarce (localStorage).
@@ -41,10 +42,10 @@ if (typeof document !== "undefined")
   });
 
 const replaceRemote = () => {
-  const { vehicles, drivers, entries, params, scenario, demo } = useFleet.getState();
+  const { vehicles, drivers, entries, schedule, params, scenario, demo } = useFleet.getState();
   window.clearTimeout(settingsTimer);
   settingsTimer = undefined;
-  sync(() => api.replaceAll({ vehicles, drivers, entries }, params, scenario, demo));
+  sync(() => api.replaceAll({ vehicles, drivers, entries, schedule }, params, scenario, demo));
 };
 
 /* Zalogowany użytkownik nie nadpisuje danych tej przeglądarki: po
@@ -70,6 +71,10 @@ interface FleetState extends FleetData {
   saveEntry: (e: Entry) => void;
   removeEntry: (id: string) => void;
   setPaid: (ids: string[], paid: boolean) => void;
+  /** Pole grafiku: kierowca albo null (puste). */
+  setSlot: (date: string, vehicleId: string, duty: Duty, driverId: string | null) => void;
+  /** Zastępuje cały tydzień grafiku, np. kopią poprzedniego. */
+  setWeekSchedule: (week: string, list: Assignment[]) => void;
   setParams: (patch: Partial<Params>) => void;
   resetParams: () => void;
   setScenario: (patch: Partial<Scenario>) => void;
@@ -106,8 +111,8 @@ export const useFleet = create<FleetState>()(
       removeVehicle: (id) => {
         set((s) => ({
           vehicles: s.vehicles.filter((v) => v.id !== id),
-          /* Kierowcy usuniętego auta zostają, tylko bez przypisania. */
-          drivers: s.drivers.map((d) => (d.vehicleId === id ? { ...d, vehicleId: null } : d)),
+          /* Grafik usuniętego auta znika, rozliczenia zostają w historii. */
+          schedule: s.schedule.filter((a) => a.vehicleId !== id),
         }));
         sync(() => api.deleteVehicle(id));
       },
@@ -120,6 +125,7 @@ export const useFleet = create<FleetState>()(
         set((s) => ({
           drivers: s.drivers.filter((d) => d.id !== id),
           entries: s.entries.filter((e) => e.driverId !== id),
+          schedule: s.schedule.filter((a) => a.driverId !== id),
         }));
         sync(() => api.deleteDriver(id));
       },
@@ -140,6 +146,23 @@ export const useFleet = create<FleetState>()(
         sync(() => api.setPaid(ids, paid));
       },
 
+      setSlot: (date, vehicleId, duty, driverId) => {
+        const key = slotKey(date, vehicleId, duty);
+        set((s) => ({
+          schedule: [
+            ...s.schedule.filter((a) => keyOf(a) !== key),
+            ...(driverId ? [{ date, vehicleId, duty, driverId }] : []),
+          ],
+        }));
+        sync(() => api.setSlot(date, vehicleId, duty, driverId));
+      },
+      setWeekSchedule: (week, list) => {
+        const dates = weekDates(week);
+        const keep = new Set(dates);
+        set((s) => ({ schedule: [...s.schedule.filter((a) => !keep.has(a.date)), ...inWeek(list, week)] }));
+        sync(() => api.replaceWeek(dates, inWeek(list, week)));
+      },
+
       setParams: (patch) => {
         set((s) => ({ params: { ...s.params, ...patch } }));
         scheduleSettings();
@@ -158,7 +181,7 @@ export const useFleet = create<FleetState>()(
         replaceRemote();
       },
       clearAll: () => {
-        set({ vehicles: [], drivers: [], entries: [], demo: false });
+        set({ vehicles: [], drivers: [], entries: [], schedule: [], demo: false });
         replaceRemote();
       },
 
@@ -170,6 +193,8 @@ export const useFleet = create<FleetState>()(
           vehicles: d.vehicles as unknown as Vehicle[],
           drivers: (d.drivers as unknown as Driver[]).map(normDriver),
           entries: (d.entries as unknown as Entry[]).map(normEntry),
+          /* Kopia sprzed grafiku nie ma tej listy. */
+          schedule: Array.isArray(d.schedule) ? (d.schedule as Assignment[]) : [],
           /* Parametry z pliku nakładamy na domyślne: starsza kopia nie może
              zostawić pustych pól po dodaniu nowego parametru. */
           params:
@@ -197,6 +222,8 @@ export const useFleet = create<FleetState>()(
           ...p,
           ...(p.drivers ? { drivers: p.drivers.map(normDriver) } : {}),
           ...(p.entries ? { entries: p.entries.map(normEntry) } : {}),
+          /* Dane sprzed grafiku: pusty grafik zamiast przykładowego. */
+          schedule: Array.isArray(p.schedule) ? p.schedule : p.vehicles ? [] : current.schedule,
           params: { ...defaultParams, ...p.params },
           scenario: { ...planScenario, ...p.scenario },
         };
@@ -207,6 +234,16 @@ export const useFleet = create<FleetState>()(
 
 /** Kopia danych do pliku. */
 export function exportSnapshot() {
-  const { vehicles, drivers, entries, params, scenario } = useFleet.getState();
-  return { app: "postoj", version: 1, exportedAt: new Date().toISOString(), vehicles, drivers, entries, params, scenario };
+  const { vehicles, drivers, entries, schedule, params, scenario } = useFleet.getState();
+  return {
+    app: "postoj",
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    vehicles,
+    drivers,
+    entries,
+    schedule,
+    params,
+    scenario,
+  };
 }

@@ -1,4 +1,4 @@
-import type { Driver, Entry, Mode, PrepKey, Shift, Vehicle, VehicleStatus } from "../domain/types";
+import type { Assignment, Driver, Duty, Entry, Mode, PrepKey, Shift, Vehicle, VehicleStatus } from "../domain/types";
 
 /* Zamiana obiektów aplikacji na wiersze tabel i z powrotem.
    Baza używa snake_case i typu numeric, który PostgREST może oddać
@@ -50,8 +50,8 @@ export const driverToRow = (d: Driver): Row => ({
   id: d.id,
   name: d.name,
   phone: d.phone,
+  email: d.email.trim().toLowerCase(),
   student: d.student,
-  vehicle_id: d.vehicleId,
   shift: d.shift,
   active: d.active,
   is_owner: d.owner,
@@ -61,9 +61,9 @@ export const rowToDriver = (r: Row): Driver => ({
   id: String(r.id),
   name: String(r.name ?? ""),
   phone: String(r.phone ?? ""),
+  email: String(r.email ?? ""),
   student: Boolean(r.student),
-  vehicleId: r.vehicle_id == null ? null : String(r.vehicle_id),
-  shift: r.shift as Shift,
+  shift: (r.shift as Shift) ?? "flex",
   active: Boolean(r.active),
   owner: Boolean(r.is_owner),
 });
@@ -100,4 +100,18 @@ export const rowToEntry = (r: Row): Entry => ({
   bonus: n(r.bonus),
   deduction: n(r.deduction),
   paid: Boolean(r.paid),
+});
+
+export const assignmentToRow = (a: Assignment): Row => ({
+  date: a.date,
+  vehicle_id: a.vehicleId,
+  duty: a.duty,
+  driver_id: a.driverId,
+});
+
+export const rowToAssignment = (r: Row): Assignment => ({
+  date: String(r.date).slice(0, 10),
+  vehicleId: String(r.vehicle_id),
+  duty: r.duty as Duty,
+  driverId: String(r.driver_id),
 });

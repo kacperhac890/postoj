@@ -4,8 +4,17 @@ import { currentWeek, shiftWeek, weekNumber, weekRange } from "../domain/week";
 const arrow =
   "press flex h-10 w-10 items-center justify-center text-ink-2 hover:bg-sunken hover:text-ink disabled:pointer-events-none disabled:opacity-35";
 
-export function WeekSwitcher({ week, onChange }: { week: string; onChange: (w: string) => void }) {
-  const atEnd = week >= currentWeek();
+export function WeekSwitcher({
+  week,
+  onChange,
+  ahead = 0,
+}: {
+  week: string;
+  onChange: (w: string) => void;
+  /** Ile tygodni naprzód wolno przejść, np. grafik planuje się z wyprzedzeniem. */
+  ahead?: number;
+}) {
+  const atEnd = week >= shiftWeek(currentWeek(), ahead);
   return (
     <div className="flex h-10 items-stretch overflow-hidden rounded-control border border-line-strong bg-surface">
       <button

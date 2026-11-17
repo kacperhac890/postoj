@@ -20,6 +20,7 @@ export function Settings() {
   const importData = useFleet((s) => s.importData);
 
   const mode = useSession((s) => s.mode);
+  const role = useSession((s) => s.role);
   const fileRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [vehicles, drivers, entries] = counts.split("/").map(Number);
@@ -60,6 +61,17 @@ export function Settings() {
     }
     if (fileRef.current) fileRef.current.value = "";
   }
+
+  /* Konto kierowcy: tylko własne konto, bez stawek i danych floty. */
+  if (role !== "admin")
+    return (
+      <>
+        <PageHeader title="Konto" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <AccountPanel />
+        </div>
+      </>
+    );
 
   return (
     <>

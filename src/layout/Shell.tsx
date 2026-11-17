@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   ArrowClockwise,
+  CalendarBlank,
   Calculator,
+  UserCircleDashed,
   Car,
   CloudCheck,
   CloudSlash,
@@ -21,26 +23,45 @@ import { Button, Panel, cn } from "../ui/kit";
 import { PageSkeleton, Spinner } from "../ui/motion";
 import { Mark } from "./Mark";
 
-const NAV: Array<{ to: string; label: string; icon: Icon }> = [
-  { to: "/", label: "Pulpit", icon: Gauge },
-  { to: "/flota", label: "Flota", icon: Car },
-  { to: "/kierowcy", label: "Kierowcy", icon: IdentificationCard },
-  { to: "/rozliczenia", label: "Rozliczenia", icon: Receipt },
-  { to: "/kalkulator", label: "Kalkulator", icon: Calculator },
-];
+type Item = { to: string; label: string; icon: Icon };
 
-const navIndex = (pathname: string) => NAV.findIndex((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to)));
+const ITEMS: Record<string, Item> = {
+  home: { to: "/", label: "Pulpit", icon: Gauge },
+  schedule: { to: "/grafik", label: "Grafik", icon: CalendarBlank },
+  fleet: { to: "/flota", label: "Flota", icon: Car },
+  drivers: { to: "/kierowcy", label: "Kierowcy", icon: IdentificationCard },
+  pay: { to: "/rozliczenia", label: "Rozliczenia", icon: Receipt },
+  calc: { to: "/kalkulator", label: "Kalkulator", icon: Calculator },
+};
+
+/* Admin widzi wszystko. Na telefonie kalkulator jest w górnym pasku,
+   żeby dolna nawigacja miała pięć pozycji. Kierowca: tylko podgląd. */
+const ADMIN_SIDE = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.drivers, ITEMS.pay, ITEMS.calc];
+const ADMIN_BOTTOM = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.drivers, ITEMS.pay];
+const DRIVER_NAV = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, { ...ITEMS.pay, label: "Moje rozliczenia" }];
+
+const indexIn = (list: Item[], pathname: string) =>
+  list.findIndex((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to)));
+
+/** Pozycja wskaźnika: poza listą (np. ustawienia) gaśnie w miejscu, zamiast jechać do góry. */
+function useIndicator(list: Item[], pathname: string) {
+  const active = indexIn(list, pathname);
+  const last = useRef(0);
+  if (active >= 0) last.current = active;
+  return { active, at: last.current };
+}
 
 export function Shell() {
   const demo = useFleet((s) => s.demo);
   const phase = useSession((s) => s.phase);
   const mode = useSession((s) => s.mode);
+  const role = useSession((s) => s.role);
   const { pathname } = useLocation();
-  const active = navIndex(pathname);
-  /* Poza główną nawigacją (ustawienia) wskaźnik gaśnie w miejscu, zamiast jechać do góry. */
-  const last = useRef(0);
-  if (active >= 0) last.current = active;
-  const at = last.current;
+  const admin = role === "admin";
+  const NAV = admin ? ADMIN_SIDE : DRIVER_NAV;
+  const BOTTOM = admin ? ADMIN_BOTTOM : DRIVER_NAV;
+  const { active, at } = useIndicator(NAV, pathname);
+  const bottom = useIndicator(BOTTOM, pathname);
 
   /* Nowy ekran zaczyna się od góry, bez animowanego przewijania. */
   useEffect(() => {
@@ -130,6 +151,20 @@ export function Shell() {
               Dane przykładowe
             </Link>
           ) : null}
+          {admin ? (
+            <NavLink
+              to="/kalkulator"
+              aria-label="Kalkulator"
+              className={({ isActive }) =>
+                cn(
+                  "press flex h-10 w-10 items-center justify-center rounded-control",
+                  isActive ? "bg-green-soft text-green-ink" : "text-ink-2 hover:bg-sunken",
+                )
+              }
+            >
+              <Calculator size={21} />
+            </NavLink>
+          ) : null}
           <NavLink
             to="/ustawienia"
             aria-label="Ustawienia i konto"
@@ -150,6 +185,8 @@ export function Shell() {
           <PageSkeleton />
         ) : phase === "error" ? (
           <LoadError />
+        ) : role === "unlinked" ? (
+          <Unlinked />
         ) : (
           <div key={pathname} className="page">
             <Outlet />
@@ -162,15 +199,19 @@ export function Shell() {
         aria-label="Główna nawigacja"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden"
       >
-        <div className="relative grid grid-cols-5">
+        <div className="relative grid" style={{ gridTemplateColumns: `repeat(${BOTTOM.length}, minmax(0, 1fr))` }}>
           <span
             aria-hidden="true"
-            className="nav-indicator pointer-events-none absolute top-[0.6rem] left-0 flex w-1/5 justify-center"
-            style={{ transform: `translateX(${at * 100}%)`, opacity: active < 0 ? 0 : 1 }}
+            className="nav-indicator pointer-events-none absolute top-[0.6rem] left-0 flex justify-center"
+            style={{
+              width: `${100 / BOTTOM.length}%`,
+              transform: `translateX(${bottom.at * 100}%)`,
+              opacity: bottom.active < 0 ? 0 : 1,
+            }}
           >
             <span className="h-7 w-12 rounded-full bg-green-soft" />
           </span>
-          {NAV.map(({ to, label, icon: Icon }) => (
+          {BOTTOM.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -316,6 +357,35 @@ function LoadError() {
           <Button variant="primary" onClick={() => void refreshAccount(false)}>
             <ArrowClockwise size={16} />
             Spróbuj ponownie
+          </Button>
+          <Button variant="quiet" onClick={() => void signOut()}>
+            Wyloguj
+          </Button>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function Unlinked() {
+  const email = useSession((s) => s.user?.email ?? "");
+  return (
+    <Panel className="enter mx-auto max-w-[540px]">
+      <div className="flex flex-col items-start gap-3 py-2">
+        <span className="flex h-10 w-10 items-center justify-center rounded-control bg-sunken text-ink-2">
+          <UserCircleDashed size={21} />
+        </span>
+        <div>
+          <h1 className="text-[1.0625rem] font-semibold text-ink">Konto czeka na przypisanie</h1>
+          <p className="mt-1 text-[0.875rem] leading-relaxed text-ink-2">
+            Jesteś zalogowany jako <span className="font-medium text-ink">{email}</span>, ale żaden kierowca we flocie nie
+            ma jeszcze tego adresu. Poproś szefa floty, żeby wpisał go w Twojej karcie kierowcy. Potem odśwież stronę.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" onClick={() => void refreshAccount(false)}>
+            <ArrowClockwise size={16} />
+            Sprawdź ponownie
           </Button>
           <Button variant="quiet" onClick={() => void signOut()}>
             Wyloguj

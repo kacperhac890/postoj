@@ -32,7 +32,11 @@ Scena: dzienne światło, telefon w ręce albo monitor w biurze. Jasny motyw, be
 ## Układ
 - Komputer (od 1024 px): panel boczny 240 px z kontem i stanem zapisu, treść do 1180 px.
 - Tablet (768 do 1023 px): wąska szyna 84 px z ikonami i podpisami, bez dolnej nawigacji.
-- Telefon: górny pasek, dolna nawigacja z pięcioma pozycjami, tabele zamieniają się w wiersze.
+- Telefon: górny pasek, dolna nawigacja z pięcioma pozycjami (kalkulator w górnym pasku), tabele zamieniają się w wiersze.
+- Kierowca ma cztery pozycje: Pulpit, Grafik, Flota, Moje rozliczenia. Bez przycisków edycji.
+- Grafik: na komputerze siatka tydzień × auta × dniówka i nocka (natywne pola wyboru), dziś podświetlone;
+  na telefonie jeden dzień naraz z przełącznikiem dni. Konflikt: czerwona ramka (dwa auta naraz), bursztynowa
+  (brak odpoczynku). Słońce i księżyc odróżniają zmiany obok nazw, nie zamiast nich.
 - Pulpit na telefonie w kolejności ważności: wynik tygodnia, sprawy do załatwienia, stawka, godziny, trend.
 - Listy aut i kierowców mają wyszukiwanie i filtry z licznikami (od czterech pozycji).
 

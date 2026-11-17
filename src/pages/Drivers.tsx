@@ -2,7 +2,8 @@ import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { IdentificationCard, Plus } from "@phosphor-icons/react";
 import { num1, pct, plural, zl } from "../domain/format";
-import { MODE_LABEL, SHIFT_LABEL } from "../domain/labels";
+import { driverWeeks } from "../domain/schedule";
+import { currentWeek } from "../domain/week";
 import type { Driver, Shift } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
 import { ListToolbar, NoMatches, fold } from "../ui/Filters";
@@ -17,7 +18,6 @@ import {
   Panel,
   Plate,
   Segmented,
-  Select,
   TextInput,
   Toggle,
   cn,
@@ -29,7 +29,7 @@ const blank = (): Driver => ({
   phone: "",
   student: false,
   owner: false,
-  vehicleId: null,
+  email: "",
   shift: "day",
   active: true,
 });
@@ -40,6 +40,7 @@ export function Drivers() {
   const drivers = useFleet((s) => s.drivers);
   const vehicles = useFleet((s) => s.vehicles);
   const entries = useFleet((s) => s.entries);
+  const schedule = useFleet((s) => s.schedule);
   const params = useFleet((s) => s.params);
   const saveDriver = useFleet((s) => s.saveDriver);
   const removeDriver = useFleet((s) => s.removeDriver);
@@ -78,29 +79,42 @@ export function Drivers() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "active" | "benched" | "students" | "inactive">("all");
 
+  /* Auta i zmiany wynikają z grafiku bieżącego tygodnia. */
+  const week = useMemo(() => driverWeeks(schedule, currentWeek()), [schedule]);
+  const plates = useMemo(() => new Map(vehicles.map((v) => [v.id, v.plate])), [vehicles]);
+
   const visible = useMemo(() => {
     const q = fold(query);
-    const plates = new Map(vehicles.map((v) => [v.id, v.plate]));
     return sorted.filter((d) => {
       if (filter === "active" && !d.active) return false;
-      if (filter === "benched" && !(d.active && !d.vehicleId)) return false;
+      if (filter === "benched" && !(d.active && !week.has(d.id))) return false;
       if (filter === "students" && !(d.active && d.student && !d.owner)) return false;
       if (filter === "inactive" && d.active) return false;
       if (!q) return true;
-      const plate = d.vehicleId ? (plates.get(d.vehicleId) ?? "") : "";
-      return fold([d.name, d.phone, plate, plate.replace(/\s/g, "")].join(" ")).includes(q);
+      const cars = (week.get(d.id)?.cars ?? []).map((c) => plates.get(c.vehicleId) ?? "");
+      return fold([d.name, d.phone, d.email, ...cars, ...cars.map((p) => p.replace(/\s/g, ""))].join(" ")).includes(q);
     });
-  }, [sorted, vehicles, query, filter]);
+  }, [sorted, plates, week, query, filter]);
 
   const active = drivers.filter((d) => d.active).length;
-  const benched = drivers.filter((d) => d.active && !d.vehicleId).length;
+  const benched = drivers.filter((d) => d.active && !week.has(d.id)).length;
   const students = drivers.filter((d) => d.active && d.student && !d.owner).length;
   const entryCount = shown ? entries.filter((e) => e.driverId === shown.id).length : 0;
-  const shownVehicle = shown ? vehicles.find((v) => v.id === shown.vehicleId) : undefined;
 
   function save() {
     if (!draft || !draft.name.trim()) return;
-    saveDriver({ ...draft, name: draft.name.trim(), phone: draft.phone.trim() });
+    const email = draft.email.trim().toLowerCase();
+    if (email && !/^\S+@\S+\.\S+$/.test(email)) {
+      toast.error("Adres e-mail konta wygląda na niepoprawny.");
+      return;
+    }
+    /* Jedno konto to jeden kierowca: inaczej nie wiadomo, czyje rozliczenia pokazać. */
+    const taken = email ? drivers.find((d) => d.id !== draft.id && d.email.toLowerCase() === email) : undefined;
+    if (taken) {
+      toast.error(`Ten e-mail ma już ${taken.name}.`);
+      return;
+    }
+    saveDriver({ ...draft, name: draft.name.trim(), phone: draft.phone.trim(), email });
     toast.ok(isNew ? `Dodano kierowcę ${draft.name.trim()}.` : `Zapisano zmiany: ${draft.name.trim()}.`);
     setDraft(null);
   }
@@ -147,7 +161,7 @@ export function Drivers() {
                 chips={[
                   { value: "all", label: "Wszyscy", count: drivers.length },
                   { value: "active", label: "Aktywni", count: active },
-                  { value: "benched", label: "Bez auta", count: benched, tone: "amber" },
+                  { value: "benched", label: "Bez zmian", count: benched, tone: "amber" },
                   { value: "students", label: "Studenci", count: students },
                   { value: "inactive", label: "Nieaktywni", count: drivers.length - active },
                 ]}
@@ -160,7 +174,7 @@ export function Drivers() {
               )}
             >
               <span>Kierowca</span>
-              <span>Auto i zmiana</span>
+              <span>Ten tydzień w grafiku</span>
               <span className="text-right">Stawka na godzinę</span>
               <span className="text-right">Średnio na tydzień</span>
             </div>
@@ -174,7 +188,7 @@ export function Drivers() {
             ) : null}
             <ul>
               {visible.map((d, i) => {
-                const vehicle = vehicles.find((v) => v.id === d.vehicleId);
+                const w = week.get(d.id);
                 const s = stats.get(d.id);
                 const perHour = s && s.hours > 0 ? s.revenue / s.hours : null;
                 const tripsPerWeek = s && s.weeks > 0 ? s.trips / s.weeks : null;
@@ -201,16 +215,28 @@ export function Drivers() {
                       </span>
 
                       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.875rem] text-ink-2">
-                        {vehicle ? (
+                        {w ? (
                           <>
-                            <Plate>{vehicle.plate}</Plate>
-                            <span>
-                              {MODE_LABEL[vehicle.mode]}, zmiana {SHIFT_LABEL[d.shift].toLowerCase()}
+                            <span className="num">
+                              {w.total} {plural(w.total, "zmiana", "zmiany", "zmian")}
+                              <span className="text-ink-3">
+                                {" "}
+                                ({w.day} D, {w.night} N)
+                              </span>
                             </span>
+                            {w.cars.slice(0, 2).map((c) => (
+                              <Plate key={c.vehicleId}>{plates.get(c.vehicleId) ?? "?"}</Plate>
+                            ))}
+                            {w.cars.length > 2 ? <span className="text-ink-3">+{w.cars.length - 2}</span> : null}
                           </>
                         ) : (
-                          <span className={d.active ? "text-amber" : "text-ink-3"}>Bez auta</span>
+                          <span className={d.active ? "text-amber" : "text-ink-3"}>Bez zmian w grafiku</span>
                         )}
+                        {d.email ? (
+                          <span className="text-[0.75rem] text-ink-3" title={`Konto: ${d.email}`}>
+                            · ma konto
+                          </span>
+                        ) : null}
                       </span>
 
                       <span className="num text-[0.9375rem] font-medium text-ink md:text-right">
@@ -297,6 +323,21 @@ export function Drivers() {
                 autoComplete="off"
               />
             </Field>
+            <Field
+              label="E-mail konta w aplikacji"
+              hint="Kierowca zakłada konto na ten adres i po zalogowaniu widzi grafik, flotę i tylko swoje rozliczenia. Niczego nie może zmienić."
+            >
+              <TextInput
+                type="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={shown.email}
+                onChange={(e) => patch({ email: e.target.value })}
+                placeholder="opcjonalnie"
+                autoComplete="off"
+              />
+            </Field>
 
             <Toggle
               checked={shown.owner}
@@ -322,32 +363,9 @@ export function Drivers() {
               />
             ) : null}
 
-            <Field
-              label="Auto"
-              hint={
-                shownVehicle
-                  ? shownVehicle.mode === "rental"
-                    ? "Auto na wynajem: kierowca płaci czynsz i opłatę od utargu, stawka procentowa go nie dotyczy."
-                    : "Auto na procent: kierowca dostaje udział w utargu."
-                  : "Bez auta kierowca nie pojawi się w rozliczeniach tygodnia."
-              }
-            >
-              <Select
-                value={shown.vehicleId ?? ""}
-                onChange={(e) => patch({ vehicleId: e.target.value || null })}
-              >
-                <option value="">Bez auta</option>
-                {vehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.plate} · {MODE_LABEL[v.mode]}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-
-            <Field label="Zmiana">
+            <Field label="Preferowana zmiana" hint="Podpowiedź do układania grafiku. Auta i dni ustawiasz w zakładce Grafik.">
               <Segmented<Shift>
-                label="Zmiana"
+                label="Preferowana zmiana"
                 value={shown.shift}
                 onChange={(shift) => patch({ shift })}
                 options={[

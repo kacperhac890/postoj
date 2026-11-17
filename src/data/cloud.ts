@@ -2,10 +2,13 @@ import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Scenario } from "../domain/engine";
 import type { FleetData } from "../domain/seed";
-import type { Driver, Entry, Params, Vehicle } from "../domain/types";
+import type { Entry, Params, Vehicle } from "../domain/types";
+import type { Assignment, Driver, Duty } from "../domain/types";
 import {
+  assignmentToRow,
   driverToRow,
   entryToRow,
+  rowToAssignment,
   rowToDriver,
   rowToEntry,
   rowToVehicle,
@@ -42,7 +45,16 @@ const T = {
   drivers: "postoj_drivers",
   entries: "postoj_entries",
   settings: "postoj_settings",
+  schedule: "postoj_schedule",
+  /* Widoki dla kierowców: auta bez kosztów i same imiona kolegów. */
+  fleetCars: "postoj_fleet_cars",
+  crew: "postoj_crew",
 } as const;
+
+/** Adres konta administratora floty. Musi być taki sam jak w supabase/schema.sql. */
+export const ADMIN_EMAIL = (
+  (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || "kacperhac890@gmail.com"
+).toLowerCase();
 
 export interface CloudSnapshot extends FleetData {
   params: Partial<Params> | null;
@@ -78,18 +90,15 @@ export function describeError(err: unknown): string {
   return raw || "Coś poszło nie tak.";
 }
 
-async function selectAll(table: string): Promise<Row[]> {
+async function selectAll(table: string, order: string[] = ["created_at", "id"]): Promise<Row[]> {
   /* PostgREST oddaje domyślnie najwyżej 1000 wierszy, więc czytamy stronami.
      Rozliczeń przybywa co tydzień, po roku jest ich ponad tysiąc. */
   const size = 1000;
   const out: Row[] = [];
   for (let from = 0; ; from += size) {
-    const { data, error } = await db()
-      .from(table)
-      .select("*")
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + size - 1);
+    let q = db().from(table).select("*");
+    for (const col of order) q = q.order(col, { ascending: true });
+    const { data, error } = await q.range(from, from + size - 1);
     if (error) throw error;
     out.push(...(data as Row[]));
     if (!data || data.length < size) break;
@@ -98,10 +107,11 @@ async function selectAll(table: string): Promise<Row[]> {
 }
 
 export async function fetchSnapshot(): Promise<CloudSnapshot> {
-  const [v, d, e, s] = await Promise.all([
+  const [v, d, e, g, s] = await Promise.all([
     selectAll(T.vehicles),
     selectAll(T.drivers),
     selectAll(T.entries),
+    selectAll(T.schedule, ["date", "vehicle_id", "duty"]),
     db().from(T.settings).select("params, scenario, demo").maybeSingle(),
   ]);
   if (s.error) throw s.error;
@@ -110,9 +120,51 @@ export async function fetchSnapshot(): Promise<CloudSnapshot> {
     vehicles: v.map(rowToVehicle),
     drivers: d.map(rowToDriver),
     entries: e.map(rowToEntry),
+    schedule: g.map(rowToAssignment),
     params: settings?.params ?? null,
     scenario: settings?.scenario ?? null,
     demo: settings?.demo ?? false,
+  };
+}
+
+export interface DriverSnapshot extends FleetData {
+  /** Karta zalogowanego kierowcy albo null, gdy konto nie jest przypisane. */
+  me: Driver | null;
+  params: Partial<Params> | null;
+}
+
+/**
+ * Dane widoczne dla kierowcy: jego karta i rozliczenia, auta bez kosztów,
+ * imiona kolegów i grafik floty. Resztę odcina baza (RLS), nie aplikacja.
+ */
+export async function fetchDriverSnapshot(): Promise<DriverSnapshot> {
+  const mine = await selectAll(T.drivers);
+  if (mine.length === 0)
+    return { me: null, vehicles: [], drivers: [], entries: [], schedule: [], params: null };
+  const me = rowToDriver(mine[0]);
+
+  const [cars, crew, entries, schedule, params] = await Promise.all([
+    selectAll(T.fleetCars),
+    selectAll(T.crew),
+    selectAll(T.entries),
+    selectAll(T.schedule, ["date", "vehicle_id", "duty"]),
+    db().rpc("postoj_fleet_params"),
+  ]);
+  if (params.error) throw params.error;
+
+  const vehicles = cars.map((r) => rowToVehicle({ ...r, lease_net: 0, insurance: 0, service_gross: 0 }));
+  const drivers = crew.map((r) =>
+    r.id === me.id
+      ? me
+      : rowToDriver({ ...r, phone: "", email: "", student: false, shift: "flex", is_owner: false }),
+  );
+  return {
+    me,
+    vehicles,
+    drivers,
+    entries: entries.map(rowToEntry).filter((x) => x.driverId === me.id),
+    schedule: schedule.map(rowToAssignment),
+    params: (params.data as Partial<Params> | null) ?? null,
   };
 }
 
@@ -198,6 +250,23 @@ export const api = {
   async setPaid(ids: string[], paid: boolean) {
     return db().from(T.entries).update({ paid }).in("id", ids);
   },
+  /** Jedno pole grafiku: kierowca albo puste (usunięcie wiersza). */
+  async setSlot(date: string, vehicleId: string, duty: Duty, driverId: string | null) {
+    if (driverId === null)
+      return db().from(T.schedule).delete().eq("date", date).eq("vehicle_id", vehicleId).eq("duty", duty);
+    const row = { ...assignmentToRow({ date, vehicleId, duty, driverId }), owner: await uid() };
+    return db().from(T.schedule).upsert(row, { onConflict: "owner,date,vehicle_id,duty" });
+  },
+  /** Cały tydzień grafiku naraz: czyści daty tygodnia i wstawia nowe wpisy. */
+  async replaceWeek(dates: string[], list: Assignment[]) {
+    const owner = await uid();
+    const del = await db().from(T.schedule).delete().eq("owner", owner).in("date", dates);
+    if (del.error) return del;
+    if (list.length === 0) return del;
+    return db()
+      .from(T.schedule)
+      .insert(list.map((a) => ({ ...assignmentToRow(a), owner })));
+  },
   async saveSettings(params: Params, scenario: Scenario, demo: boolean) {
     const owner = await uid();
     return db().from(T.settings).upsert({ owner, params, scenario, demo }, { onConflict: "owner" });
@@ -207,7 +276,7 @@ export const api = {
   async replaceAll(data: FleetData, params: Params, scenario: Scenario, demo: boolean) {
     const owner = await uid();
     const c = db();
-    for (const table of [T.entries, T.drivers, T.vehicles]) {
+    for (const table of [T.schedule, T.entries, T.drivers, T.vehicles]) {
       const { error } = await c.from(table).delete().eq("owner", owner);
       if (error) throw error;
     }
@@ -222,11 +291,14 @@ export const api = {
     /* Kopia z pliku może być niespójna (np. kierowca przy usuniętym aucie).
        Baza pilnuje kluczy obcych, więc porządkujemy dane przed zapisem. */
     const carIds = new Set(data.vehicles.map((v) => v.id));
-    const drivers = data.drivers.map((d) => (d.vehicleId && !carIds.has(d.vehicleId) ? { ...d, vehicleId: null } : d));
-    const driverIds = new Set(drivers.map((d) => d.id));
+    const driverIds = new Set(data.drivers.map((d) => d.id));
     await insert(T.vehicles, data.vehicles.map(vehicleToRow));
-    await insert(T.drivers, drivers.map(driverToRow));
+    await insert(T.drivers, data.drivers.map(driverToRow));
     await insert(T.entries, data.entries.filter((e) => driverIds.has(e.driverId)).map(entryToRow));
+    await insert(
+      T.schedule,
+      data.schedule.filter((a) => carIds.has(a.vehicleId) && driverIds.has(a.driverId)).map(assignmentToRow),
+    );
     const { error } = await c.from(T.settings).upsert({ owner, params, scenario, demo }, { onConflict: "owner" });
     if (error) throw error;
   },

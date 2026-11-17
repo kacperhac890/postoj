@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { demoData } from "../domain/seed";
-import { driverToRow, entryToRow, rowToDriver, rowToEntry, rowToVehicle, vehicleToRow } from "./rows";
+import {
+  assignmentToRow,
+  driverToRow,
+  entryToRow,
+  rowToAssignment,
+  rowToDriver,
+  rowToEntry,
+  rowToVehicle,
+  vehicleToRow,
+} from "./rows";
 
 /* Dane muszą przejść przez bazę bez zmian: zapis i odczyt dają to samo. */
 describe("mapowanie wierszy bazy", () => {
@@ -26,9 +35,14 @@ describe("mapowanie wierszy bazy", () => {
     expect(v.prep).toEqual({ inspection: true, registration: false, marking: false, extract: false, meter: false });
   });
 
-  it("kierowca bez auta ma null, nie pusty tekst", () => {
-    const d = rowToDriver({ ...driverToRow(data.drivers[0]), vehicle_id: null });
-    expect(d.vehicleId).toBeNull();
+  it("e-mail kierowcy zapisuje się małymi literami i bez spacji", () => {
+    const row = driverToRow({ ...data.drivers[0], email: "  Jan.Kowal@Firma.PL " });
+    expect(row.email).toBe("jan.kowal@firma.pl");
+  });
+
+  it("grafik wraca z bazy bez zmian, także gdy data przychodzi z czasem", () => {
+    expect(data.schedule.map((a) => rowToAssignment(assignmentToRow(a)))).toEqual(data.schedule);
+    expect(rowToAssignment({ ...assignmentToRow(data.schedule[0]), date: "2026-11-17T00:00:00" }).date).toBe("2026-11-17");
   });
 });
 

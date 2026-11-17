@@ -4,7 +4,9 @@ import { Car, Check, Plus } from "@phosphor-icons/react";
 import { vehicleMonthlyNet } from "../domain/engine";
 import { daysUntil, plural, shortDate, toIso, zl } from "../domain/format";
 import { MODE_LABEL, PREP_STEPS, STATUS_LABEL } from "../domain/labels";
-import { weekNumber } from "../domain/week";
+import { inWeek } from "../domain/schedule";
+import { currentWeek, weekNumber } from "../domain/week";
+import { useSession } from "../data/session";
 import type { Mode, Vehicle, VehicleStatus } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
 import { ListToolbar, NoMatches, fold } from "../ui/Filters";
@@ -91,14 +93,26 @@ export function Fleet() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
+  const schedule = useFleet((s) => s.schedule);
+  const editable = useSession((s) => s.role) === "admin";
+
+  /* Kto jeździ danym autem w tym tygodniu, według grafiku, od najczęstszego. */
   const crewOf = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const d of drivers) {
-      if (!d.active || !d.vehicleId) continue;
-      map.set(d.vehicleId, [...(map.get(d.vehicleId) ?? []), d.name]);
+    const names = new Map(drivers.map((d) => [d.id, d.name]));
+    const count = new Map<string, Map<string, number>>();
+    for (const a of inWeek(schedule, currentWeek())) {
+      const m = count.get(a.vehicleId) ?? new Map<string, number>();
+      m.set(a.driverId, (m.get(a.driverId) ?? 0) + 1);
+      count.set(a.vehicleId, m);
     }
+    const map = new Map<string, string[]>();
+    for (const [vehicleId, m] of count)
+      map.set(
+        vehicleId,
+        [...m.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => names.get(id) ?? "Kierowca"),
+      );
     return map;
-  }, [drivers]);
+  }, [drivers, schedule]);
 
   const counts = useMemo(() => {
     const c = { all: vehicles.length, active: 0, service: 0, idle: 0, attention: 0 };
@@ -139,18 +153,28 @@ export function Fleet() {
           vehicles.length > 0 ? (
             <>
               {vehicles.length} {plural(vehicles.length, "auto", "auta", "aut")}: {vehicles.length - rental} na
-              procent, {rental} na wynajem. Koszty stałe aut to{" "}
-              <span className="num font-medium text-ink">{zl(monthly)}</span> netto miesięcznie.
+              procent, {rental} na wynajem.
+              {editable ? (
+                <>
+                  {" "}
+                  Koszty stałe aut to <span className="num font-medium text-ink">{zl(monthly)}</span> netto
+                  miesięcznie.
+                </>
+              ) : (
+                " Obsada według grafiku na ten tydzień."
+              )}
             </>
           ) : (
             "Auta, ich koszty i terminy w jednym miejscu."
           )
         }
       >
-        <Button variant="primary" onClick={() => setDraft(blank())}>
-          <Plus size={16} weight="bold" />
-          Dodaj auto
-        </Button>
+        {editable ? (
+          <Button variant="primary" onClick={() => setDraft(blank())}>
+            <Plus size={16} weight="bold" />
+            Dodaj auto
+          </Button>
+        ) : null}
       </PageHeader>
 
       <Panel flush>
@@ -159,9 +183,11 @@ export function Fleet() {
             icon={<Car size={20} />}
             title="Nie masz jeszcze żadnego auta"
             action={
-              <Button variant="primary" onClick={() => setDraft(blank())}>
-                Dodaj pierwsze auto
-              </Button>
+              editable ? (
+                <Button variant="primary" onClick={() => setDraft(blank())}>
+                  Dodaj pierwsze auto
+                </Button>
+              ) : undefined
             }
           >
             Dodaj auto z ratą leasingu, ubezpieczeniem i serwisem. Od tych kwot zależy próg
@@ -193,8 +219,8 @@ export function Fleet() {
             >
               <span>Auto</span>
               <span>Rozliczenie</span>
-              <span>Kierowcy</span>
-              <span className="text-right">Koszt miesięczny</span>
+              <span>W grafiku w tym tygodniu</span>
+              <span className="text-right">{editable ? "Koszt miesięczny" : ""}</span>
               <span>Terminy i gotowość</span>
             </div>
             {visible.length === 0 ? (
@@ -207,7 +233,7 @@ export function Fleet() {
             ) : null}
             <ul>
               {visible.map((v, i) => {
-                const crew = drivers.filter((d) => d.vehicleId === v.id && d.active);
+                const crew = crewOf.get(v.id) ?? [];
                 const done = PREP_STEPS.filter((s) => v.prep[s.key]).length;
                 return (
                   <li
@@ -218,8 +244,10 @@ export function Fleet() {
                     <button
                       type="button"
                       onClick={() => setDraft(v)}
+                      disabled={!editable}
                       className={cn(
-                        "flex w-full flex-wrap items-baseline gap-x-2 gap-y-1.5 px-4 py-3.5 text-left transition-colors duration-150 hover:bg-bg md:grid md:items-center md:gap-x-4 md:px-5",
+                        "flex w-full flex-wrap items-baseline gap-x-2 gap-y-1.5 px-4 py-3.5 text-left transition-colors duration-150 md:grid md:items-center md:gap-x-4 md:px-5",
+                        editable ? "hover:bg-bg" : "cursor-default",
                         COLS,
                       )}
                     >
@@ -243,15 +271,22 @@ export function Fleet() {
 
                       <span className="min-w-0 flex-1 truncate text-[0.875rem] text-ink-2">
                         {crew.length > 0 ? (
-                          crew.map((d) => d.name).join(", ")
+                          <>
+                            {crew.slice(0, 3).join(", ")}
+                            {crew.length > 3 ? <span className="text-ink-3"> +{crew.length - 3}</span> : null}
+                          </>
                         ) : (
-                          <span className="text-amber">Brak kierowcy</span>
+                          <span className={v.status === "active" ? "text-amber" : "text-ink-3"}>Brak w grafiku</span>
                         )}
                       </span>
 
                       <span className="num text-[0.9375rem] font-medium text-ink md:text-right">
-                        {zl(vehicleMonthlyNet(v, params))}
-                        <span className="ml-1 text-[0.75rem] font-normal text-ink-3 md:hidden">mies.</span>
+                        {editable ? (
+                          <>
+                            {zl(vehicleMonthlyNet(v, params))}
+                            <span className="ml-1 text-[0.75rem] font-normal text-ink-3 md:hidden">mies.</span>
+                          </>
+                        ) : null}
                       </span>
 
                       <span className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] md:w-auto">

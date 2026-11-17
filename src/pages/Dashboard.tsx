@@ -3,7 +3,10 @@ import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowRight,
+  CalendarBlank,
   CalendarCheck,
+  Moon,
+  Sun,
   Car,
   CheckCircle,
   IdentificationCard,
@@ -16,12 +19,13 @@ import { toast } from "../ui/Toast";
 import type { Icon } from "@phosphor-icons/react";
 import { RateTrack, WeekBars } from "../charts/charts";
 import { breakEvenRate, scenarioFromFleet, settle, weekResult } from "../domain/engine";
-import { daysUntil, num1, pct, plural, zl } from "../domain/format";
+import { daysUntil, num1, pct, plural, toIso, zl } from "../domain/format";
 import { PREP_STEPS } from "../domain/labels";
-import { lastFullWeek, shiftWeek, weekNumber } from "../domain/week";
+import { DUTIES, DUTY_LABEL, addDays, dayLabel, driverWeeks, inWeek as inWeekSchedule, keyOf, slotKey } from "../domain/schedule";
+import { currentWeek, lastFullWeek, shiftWeek, weekNumber, weekRange } from "../domain/week";
 import { useFleet } from "../store/useFleet";
 import { WeekSwitcher } from "../ui/WeekSwitcher";
-import { Button, Empty, PageHeader, Panel, cn } from "../ui/kit";
+import { Button, Empty, PageHeader, Panel, Plate, cn } from "../ui/kit";
 import { Tween } from "../ui/motion";
 
 interface Task {
@@ -33,6 +37,12 @@ interface Task {
 }
 
 export function Dashboard() {
+  const role = useSession((s) => s.role);
+  return role === "admin" ? <FleetDashboard /> : <DriverHome />;
+}
+
+function FleetDashboard() {
+  const schedule = useFleet((s) => s.schedule);
   const vehicles = useFleet((s) => s.vehicles);
   const drivers = useFleet((s) => s.drivers);
   const entries = useFleet((s) => s.entries);
@@ -113,16 +123,32 @@ export function Dashboard() {
         to: "/rozliczenia",
       });
 
-    const missing = drivers.filter(
-      (d) => d.active && d.vehicleId && !inWeek.some((e) => e.driverId === d.id),
-    ).length;
+    /* Kto jeździł według grafiku, a nie ma jeszcze rozliczenia. */
+    const worked = driverWeeks(schedule, week);
+    const missing = [...worked.keys()].filter((id) => !inWeek.some((e) => e.driverId === id)).length;
     if (missing > 0)
       list.push({
         icon: Receipt,
-        text: `${missing} ${plural(missing, "kierowca", "kierowców", "kierowców")} bez danych za tydzień ${weekNumber(week)}`,
+        text: `${missing} ${plural(missing, "kierowca", "kierowców", "kierowców")} z grafiku bez danych za tydzień ${weekNumber(week)}`,
         to: "/rozliczenia",
         tone: "amber",
       });
+
+    /* Wolne zmiany w najbliższych siedmiu dniach na jeżdżących autach. */
+    const today = toIso(new Date());
+    const next = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+    const taken = new Set(schedule.filter((a) => next.includes(a.date)).map(keyOf));
+    let free = 0;
+    for (const v of vehicles)
+      if (v.status === "active")
+        for (const date of next) for (const duty of DUTIES) if (!taken.has(slotKey(date, v.id, duty))) free += 1;
+    if (free > 0)
+      list.push({
+        icon: CalendarBlank,
+        text: `${free} ${plural(free, "wolna zmiana", "wolne zmiany", "wolnych zmian")} w grafiku na 7 dni`,
+        to: "/grafik",
+      });
+    const thisWeek = driverWeeks(schedule, currentWeek());
 
     for (const v of vehicles) {
       for (const [label, iso] of [
@@ -148,20 +174,20 @@ export function Dashboard() {
           to: "/flota",
           tone: "amber",
         });
-      if (v.status === "active" && !drivers.some((d) => d.active && d.vehicleId === v.id))
-        list.push({ icon: Car, text: `${v.plate} jeździ bez kierowcy`, to: "/flota", tone: "amber" });
+      if (v.status === "active" && !inWeekSchedule(schedule, currentWeek()).some((a) => a.vehicleId === v.id))
+        list.push({ icon: Car, text: `${v.plate} nie ma nikogo w grafiku w tym tygodniu`, to: "/grafik", tone: "amber" });
     }
 
-    const benched = drivers.filter((d) => d.active && !d.vehicleId).length;
+    const benched = drivers.filter((d) => d.active && !thisWeek.has(d.id)).length;
     if (benched > 0)
       list.push({
         icon: IdentificationCard,
-        text: `${benched} ${plural(benched, "aktywny kierowca", "aktywnych kierowców", "aktywnych kierowców")} bez auta`,
-        to: "/kierowcy",
+        text: `${benched} ${plural(benched, "aktywny kierowca", "aktywnych kierowców", "aktywnych kierowców")} bez zmian w tym tygodniu`,
+        to: "/grafik",
       });
 
     return list;
-  }, [entries, drivers, vehicles, params, inWeek, week]);
+  }, [entries, drivers, vehicles, params, inWeek, week, schedule]);
 
   if (vehicles.length === 0 && drivers.length === 0) {
     return (
@@ -401,6 +427,99 @@ export function Dashboard() {
             </p>
           </Panel>
         </div>
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Pulpit kierowcy: najbliższe zmiany i ostatnie rozliczenie.
+   ------------------------------------------------------------------ */
+
+function DriverHome() {
+  const meId = useSession((s) => s.meId);
+  const drivers = useFleet((s) => s.drivers);
+  const vehicles = useFleet((s) => s.vehicles);
+  const schedule = useFleet((s) => s.schedule);
+  const entries = useFleet((s) => s.entries);
+  const params = useFleet((s) => s.params);
+
+  const me = drivers.find((d) => d.id === meId);
+  const today = toIso(new Date());
+  const plates = new Map(vehicles.map((v) => [v.id, v.plate]));
+  const upcoming = schedule
+    .filter((a) => a.driverId === meId && a.date >= today && a.date <= addDays(today, 13))
+    .sort((a, b) => (a.date + (a.duty === "day" ? 0 : 1)).localeCompare(b.date + (b.duty === "day" ? 0 : 1)));
+  const last = [...entries].filter((e) => e.driverId === meId).sort((a, b) => (a.week < b.week ? 1 : -1))[0];
+  const s = last ? settle(last, params) : null;
+
+  return (
+    <>
+      <PageHeader
+        title={me ? `Cześć, ${me.name.split(" ")[0]}` : "Pulpit"}
+        lead="Twoje zmiany w grafiku i ostatnie rozliczenie. Zmiany wprowadza szef floty."
+      />
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start">
+        <Panel
+          title="Najbliższe zmiany"
+          aside={<Link to="/grafik" className="font-medium text-green-ink hover:underline">cały grafik</Link>}
+          flush
+        >
+          {upcoming.length === 0 ? (
+            <p className="px-4 py-5 text-[0.875rem] text-ink-2 md:px-5">Na najbliższe dwa tygodnie nie masz zmian w grafiku.</p>
+          ) : (
+            <ul>
+              {upcoming.map((a, i) => (
+                <li
+                  key={`${a.date}-${a.duty}`}
+                  style={{ "--i": i } as CSSProperties}
+                  className={cn(
+                    "stagger-item flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 md:px-5",
+                    a.date === today && "bg-green-soft/50",
+                  )}
+                >
+                  {a.duty === "day" ? (
+                    <Sun size={16} weight="fill" className="shrink-0 text-amber" />
+                  ) : (
+                    <Moon size={16} weight="fill" className="shrink-0 text-green-deep-2" />
+                  )}
+                  <span className="min-w-0 flex-1 text-[0.875rem] text-ink">
+                    <span className="font-medium capitalize">{a.date === today ? "dziś" : dayLabel(a.date).long}</span>
+                    <span className="num ml-1.5 text-ink-3">{dayLabel(a.date).date}</span>
+                    <span className="ml-2 text-ink-2">{DUTY_LABEL[a.duty]}</span>
+                  </span>
+                  {plates.get(a.vehicleId) ? <Plate>{plates.get(a.vehicleId)}</Plate> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel
+          title="Ostatnie rozliczenie"
+          aside={<Link to="/rozliczenia" className="font-medium text-green-ink hover:underline">wszystkie</Link>}
+        >
+          {last && s ? (
+            <div className="flex flex-col gap-2">
+              <div className="text-[0.8125rem] text-ink-3">
+                Tydzień {weekNumber(last.week)}, {weekRange(last.week)}
+              </div>
+              <div className="num text-[1.875rem] leading-none font-semibold tracking-[-0.02em] text-ink">
+                {s.ownerDrive ? "—" : <Tween value={last.mode === "rental" ? s.dueFromDriver : s.payout} format={zl} />}
+              </div>
+              <div className="text-[0.8125rem] text-ink-2">
+                {s.ownerDrive ? "właściciel, bez wypłaty" : last.mode === "rental" ? "do zapłaty za wynajem" : "wypłata brutto"}
+                {" · "}
+                {last.paid ? "rozliczone" : "czeka na rozliczenie"}
+              </div>
+              <div className="num mt-2 border-t border-line pt-2 text-[0.8125rem] text-ink-2">
+                {zl(last.revenue)} utargu · {num1(last.hours)} h · {last.trips} kursów
+              </div>
+            </div>
+          ) : (
+            <p className="text-[0.875rem] text-ink-2">Nie masz jeszcze rozliczeń.</p>
+          )}
+        </Panel>
       </div>
     </>
   );

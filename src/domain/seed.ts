@@ -1,5 +1,6 @@
 import { toIso } from "./format";
-import type { Driver, Entry, Mode, PrepKey, Vehicle } from "./types";
+import { driverWeeks, weekDates } from "./schedule";
+import type { Assignment, Driver, Entry, Mode, PrepKey, Vehicle } from "./types";
 import { currentWeek, shiftWeek } from "./week";
 
 /* Dane przykładowe. Wymyślone, oznaczone w aplikacji i usuwalne jednym
@@ -34,6 +35,7 @@ export interface FleetData {
   vehicles: Vehicle[];
   drivers: Driver[];
   entries: Entry[];
+  schedule: Assignment[];
 }
 
 export function demoData(today = new Date()): FleetData {
@@ -76,6 +78,9 @@ export function demoData(today = new Date()): FleetData {
     }),
   ];
 
+  /* Na którym aucie kierowca zwykle jeździ. Tylko do ułożenia przykładowego
+     grafiku: w aplikacji kierowca nie ma stałego auta. */
+  const home = new Map<string, string>();
   const person = (
     n: number,
     name: string,
@@ -83,16 +88,10 @@ export function demoData(today = new Date()): FleetData {
     vehicle: number | null,
     shift: Driver["shift"],
     active = true,
-  ): Driver => ({
-    id: `demo-d${n}`,
-    name,
-    phone: "",
-    student,
-    vehicleId: vehicle ? `demo-v${vehicle}` : null,
-    shift,
-    active,
-    owner: false,
-  });
+  ): Driver => {
+    if (vehicle) home.set(`demo-d${n}`, `demo-v${vehicle}`);
+    return { id: `demo-d${n}`, name, phone: "", email: "", student, shift, active, owner: false };
+  };
 
   const drivers: Driver[] = [
     person(1, "Marta W.", true, 1, "day"),
@@ -127,8 +126,9 @@ export function demoData(today = new Date()): FleetData {
     /* Tygodnie nie są równe: pogoda, wydarzenia w mieście, święta. */
     const season = between(0.86, 1.06);
     drivers.forEach((d, index) => {
-      if (!d.vehicleId || !d.active) return;
-      const vehicle = vehicles.find((v) => v.id === d.vehicleId);
+      const vehicleId = home.get(d.id);
+      if (!vehicleId || !d.active) return;
+      const vehicle = vehicles.find((v) => v.id === vehicleId);
       if (!vehicle) return;
 
       const rental = vehicle.mode === "rental";
@@ -157,5 +157,60 @@ export function demoData(today = new Date()): FleetData {
     });
   }
 
-  return { vehicles, drivers, entries };
+  /* Grafik od ośmiu tygodni wstecz do przyszłego tygodnia. Auto na procent:
+     dniówka i nocka swoich kierowców, każdy ma jeden dzień wolny, dniówki
+     zastępuje wtedy kierowca bez stałego auta. Auto na wynajem: najemca
+     przez cały tydzień na dniówce. */
+  const schedule: Assignment[] = [];
+  const spare = "demo-d16";
+  for (let back = WEEKS; back >= -1; back -= 1) {
+    const dates = weekDates(shiftWeek(thisWeek, -back));
+    for (const v of vehicles) {
+      if (v.status !== "active") continue;
+      const crew = drivers.filter((d) => d.active && home.get(d.id) === v.id);
+      dates.forEach((date, day) => {
+        if (v.mode === "rental") {
+          if (crew[0]) schedule.push({ date, vehicleId: v.id, duty: "day", driverId: crew[0].id });
+          return;
+        }
+        const [dayDriver, nightDriver] = crew;
+        const carNo = Number(v.id.replace("demo-v", ""));
+        if (dayDriver) {
+          const off = (carNo + 1) % 7 === day;
+          const busy = schedule.some((a) => a.date === date && a.duty === "day" && a.driverId === spare);
+          if (!off) schedule.push({ date, vehicleId: v.id, duty: "day", driverId: dayDriver.id });
+          else if (!busy) schedule.push({ date, vehicleId: v.id, duty: "day", driverId: spare });
+        }
+        if (nightDriver && (carNo + 4) % 7 !== day)
+          schedule.push({ date, vehicleId: v.id, duty: "night", driverId: nightDriver.id });
+      });
+    }
+  }
+
+  /* Zastępczyni nie ma stałego auta: jej rozliczenia wynikają z grafiku. */
+  for (let back = WEEKS; back >= 2; back -= 1) {
+    const week = shiftWeek(thisWeek, -back);
+    const w = driverWeeks(schedule, week).get(spare);
+    if (!w) continue;
+    const vehicle = vehicles.find((v) => v.id === w.cars[0].vehicleId)!;
+    const hours = half(w.total * between(6.5, 8));
+    entries.push({
+      id: `demo-e${back}-${spare}`,
+      driverId: spare,
+      week,
+      mode: vehicle.mode,
+      student: true,
+      owner: false,
+      fuelGross: null,
+      vehicleId: vehicle.id,
+      revenue: Math.round(hours * between(50, 60)),
+      hours,
+      trips: Math.round(hours * between(2.7, 3.4)),
+      bonus: 0,
+      deduction: 0,
+      paid: true,
+    });
+  }
+
+  return { vehicles, drivers, entries, schedule };
 }

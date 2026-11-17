@@ -34,13 +34,27 @@ export interface Driver {
   id: string;
   name: string;
   phone: string;
+  /** Adres konta kierowcy w aplikacji. Po zalogowaniu widzi grafik, flotę i swoje rozliczenia. */
+  email: string;
   /** Student do 26 lat na zleceniu: wyższa stawka, bez ZUS pracodawcy. */
   student: boolean;
-  vehicleId: string | null;
+  /** Preferowana zmiana. Auto i dni wynikają z grafiku. */
   shift: Shift;
   active: boolean;
   /** Właściciel spółki za kierownicą: bez wypłaty, cały utarg zostaje w spółce. */
   owner: boolean;
+}
+
+/** Zmiana w grafiku: dniówka albo nocka. */
+export type Duty = "day" | "night";
+
+/** Jedno pole grafiku: dzień, auto i zmiana, na które wpisano kierowcę. */
+export interface Assignment {
+  /** Data RRRR-MM-DD. Nocka należy do dnia, w którym się zaczyna. */
+  date: string;
+  vehicleId: string;
+  duty: Duty;
+  driverId: string;
 }
 
 /** Tygodniowe dane kierowcy z aplikacji. */

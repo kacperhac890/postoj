@@ -51,6 +51,19 @@ Klucz `anon` jest jawny z założenia (trafia do przeglądarki). Klucza `service
 Pliki: `src/data/cloud.ts` (połączenie, odczyt, kolejka zapisów), `src/data/session.ts` (sesja, tryby,
 logowanie), `src/data/rows.ts` (zamiana obiektów na wiersze tabel, z testami).
 
+## Grafik i konta kierowców
+
+- **Grafik** (`/grafik`): na każdy dzień tygodnia, każde auto i każdą zmianę (dniówka, nocka) wybiera się
+  kierowcę. Kierowca nie ma stałego auta. Aplikacja ostrzega, gdy ktoś jest na dwóch autach naraz albo ma
+  dniówkę zaraz po nocce, i kopiuje poprzedni tydzień jednym przyciskiem.
+- **Rozliczenia** pokazują kierowców, którzy mieli zmiany w grafiku. Auto w rozliczeniu podpowiada się
+  z grafiku (najczęstsze w tygodniu) i można je zmienić; od auta zależy, czy liczymy procent, czy wynajem.
+- **Role.** Konto `kacperhac890@gmail.com` jest administratorem (adres w `supabase/schema.sql`,
+  funkcja `postoj_is_admin`, i w `src/data/cloud.ts`, `ADMIN_EMAIL`). Każde inne konto to kierowca:
+  w karcie kierowcy wpisuje się jego e-mail, a po zalogowaniu na ten adres widzi grafik, flotę bez kosztów
+  i tylko swoje rozliczenia. Niczego nie może zmienić. Pilnuje tego baza (RLS i widoki), nie tylko ekran.
+- Konto z adresem, którego nie ma w żadnej karcie kierowcy, widzi tylko prośbę o przypisanie.
+
 ## Paliwo i właściciel za kierownicą
 
 - W rozliczeniu tygodnia auta na procent można wpisać realny koszt paliwa brutto z rachunków. Puste pole
