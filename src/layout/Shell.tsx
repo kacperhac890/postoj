@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   ArrowClockwise,
@@ -14,9 +15,11 @@ import {
   Receipt,
   SignIn,
   SignOut,
+  Wrench,
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import { cloudConfigured } from "../data/cloud";
+import { startIssuesLive, stopIssuesLive, useUnreadCount } from "../data/issues";
 import { leaveGuest, refreshAccount, signOut, useSession } from "../data/session";
 import { useFleet } from "../store/useFleet";
 import { Button, Panel, cn } from "../ui/kit";
@@ -29,16 +32,34 @@ const ITEMS: Record<string, Item> = {
   home: { to: "/", label: "Pulpit", icon: Gauge },
   schedule: { to: "/grafik", label: "Grafik", icon: CalendarBlank },
   fleet: { to: "/flota", label: "Flota", icon: Car },
+  issues: { to: "/usterki", label: "Usterki", icon: Wrench },
   drivers: { to: "/kierowcy", label: "Kierowcy", icon: IdentificationCard },
   pay: { to: "/rozliczenia", label: "Rozliczenia", icon: Receipt },
   calc: { to: "/kalkulator", label: "Kalkulator", icon: Calculator },
 };
 
-/* Admin widzi wszystko. Na telefonie kalkulator jest w górnym pasku,
-   żeby dolna nawigacja miała pięć pozycji. Kierowca: tylko podgląd. */
-const ADMIN_SIDE = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.drivers, ITEMS.pay, ITEMS.calc];
+/* Admin widzi wszystko. Na telefonie kalkulator i usterki są w górnym pasku,
+   żeby dolna nawigacja miała pięć pozycji. Kierowca: podgląd i zgłaszanie usterek. */
+const ADMIN_SIDE = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.issues, ITEMS.drivers, ITEMS.pay, ITEMS.calc];
 const ADMIN_BOTTOM = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.drivers, ITEMS.pay];
-const DRIVER_NAV = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, { ...ITEMS.pay, label: "Moje rozliczenia" }];
+const DRIVER_SIDE = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.issues, { ...ITEMS.pay, label: "Moje rozliczenia" }];
+const DRIVER_BOTTOM = [ITEMS.home, ITEMS.schedule, ITEMS.fleet, ITEMS.issues, ITEMS.pay];
+
+/** Liczba nieprzeczytanych rozmów przy ikonie usterek. */
+function Unread({ count, className }: { count: number; className?: string }): ReactNode {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={cn(
+        "num absolute flex h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-red px-1 text-[0.625rem] leading-none font-semibold text-white",
+        className,
+      )}
+      aria-label={`${count} nowych wiadomości`}
+    >
+      {count > 9 ? "9+" : count}
+    </span>
+  );
+}
 
 const indexIn = (list: Item[], pathname: string) =>
   list.findIndex((n) => (n.to === "/" ? pathname === "/" : pathname.startsWith(n.to)));
@@ -58,8 +79,17 @@ export function Shell() {
   const role = useSession((s) => s.role);
   const { pathname } = useLocation();
   const admin = role === "admin";
-  const NAV = admin ? ADMIN_SIDE : DRIVER_NAV;
-  const BOTTOM = admin ? ADMIN_BOTTOM : DRIVER_NAV;
+  const NAV = admin ? ADMIN_SIDE : DRIVER_SIDE;
+  const BOTTOM = admin ? ADMIN_BOTTOM : DRIVER_BOTTOM;
+  const unread = useUnreadCount();
+  const user = useSession((s) => s.user?.id ?? null);
+
+  /* Usterki na żywo: po wczytaniu konta (albo od razu bez konta). */
+  useEffect(() => {
+    if (phase !== "ready" || role === "unlinked") return;
+    startIssuesLive();
+    return () => stopIssuesLive();
+  }, [phase, role, mode, user]);
   const { active, at } = useIndicator(NAV, pathname);
   const bottom = useIndicator(BOTTOM, pathname);
 
@@ -103,7 +133,10 @@ export function Shell() {
             >
               {({ isActive }) => (
                 <>
-                  <Icon size={19} weight={isActive ? "fill" : "regular"} className="shrink-0" />
+                  <span className="relative shrink-0">
+                    <Icon size={19} weight={isActive ? "fill" : "regular"} />
+                    {to === "/usterki" ? <Unread count={unread} className="-top-1.5 -right-2.5" /> : null}
+                  </span>
                   <span className="max-lg:leading-none">{label}</span>
                 </>
               )}
@@ -150,6 +183,21 @@ export function Shell() {
             >
               Dane przykładowe
             </Link>
+          ) : null}
+          {admin ? (
+            <NavLink
+              to="/usterki"
+              aria-label="Usterki"
+              className={({ isActive }) =>
+                cn(
+                  "press relative flex h-10 w-10 items-center justify-center rounded-control",
+                  isActive ? "bg-green-soft text-green-ink" : "text-ink-2 hover:bg-sunken",
+                )
+              }
+            >
+              <Wrench size={21} />
+              <Unread count={unread} className="top-1 right-0.5" />
+            </NavLink>
           ) : null}
           {admin ? (
             <NavLink
@@ -225,8 +273,9 @@ export function Shell() {
             >
               {({ isActive }) => (
                 <>
-                  <span className="flex h-7 w-12 items-center justify-center">
+                  <span className="relative flex h-7 w-12 items-center justify-center">
                     <Icon size={21} weight={isActive ? "fill" : "regular"} />
+                    {to === "/usterki" ? <Unread count={unread} className="-top-0.5 right-1" /> : null}
                   </span>
                   {label}
                 </>

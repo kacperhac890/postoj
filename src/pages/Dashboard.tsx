@@ -15,6 +15,7 @@ import {
   Wrench,
 } from "@phosphor-icons/react";
 import { readLocalCopy, useSession } from "../data/session";
+import { useIssues } from "../data/issues";
 import { toast } from "../ui/Toast";
 import type { Icon } from "@phosphor-icons/react";
 import { RateTrack, WeekBars } from "../charts/charts";
@@ -51,6 +52,7 @@ function FleetDashboard() {
   const loadDemo = useFleet((s) => s.loadDemo);
   const importData = useFleet((s) => s.importData);
   const mode = useSession((s) => s.mode);
+  const issues = useIssues((s) => s.issues);
   /* Pierwsze logowanie: dane wpisane wcześniej bez konta można przenieść. */
   const localCopy = useMemo(() => (mode === "cloud" ? readLocalCopy() : null), [mode]);
 
@@ -92,6 +94,26 @@ function FleetDashboard() {
 
   const tasks = useMemo<Task[]>(() => {
     const list: Task[] = [];
+    const plateOf = new Map(vehicles.map((v) => [v.id, v.plate]));
+
+    /* Usterki zgłoszone przez kierowców: auto stoi na samej górze. */
+    const openIssues = issues
+      .filter((i) => i.status !== "resolved" && plateOf.has(i.vehicleId))
+      .sort((a, b) => Number(b.urgent) - Number(a.urgent) || b.lastMessageAt.localeCompare(a.lastMessageAt));
+    for (const i of openIssues.slice(0, 3))
+      list.push({
+        icon: Wrench,
+        text: `${plateOf.get(i.vehicleId)}: ${i.title}`,
+        detail: i.urgent ? "auto stoi" : i.status === "progress" ? "w naprawie" : "zgłoszone",
+        to: `/usterki/${i.id}`,
+        tone: i.urgent ? "red" : "amber",
+      });
+    if (openIssues.length > 3)
+      list.push({
+        icon: Wrench,
+        text: `Jeszcze ${openIssues.length - 3} ${plural(openIssues.length - 3, "otwarta usterka", "otwarte usterki", "otwartych usterek")}`,
+        to: "/usterki",
+      });
 
     let toPay = 0;
     let payCount = 0;
@@ -187,7 +209,7 @@ function FleetDashboard() {
       });
 
     return list;
-  }, [entries, drivers, vehicles, params, inWeek, week, schedule]);
+  }, [entries, drivers, vehicles, params, inWeek, week, schedule, issues]);
 
   if (vehicles.length === 0 && drivers.length === 0) {
     return (
@@ -458,7 +480,15 @@ function DriverHome() {
       <PageHeader
         title={me ? `Cześć, ${me.name.split(" ")[0]}` : "Pulpit"}
         lead="Twoje zmiany w grafiku i ostatnie rozliczenie. Zmiany wprowadza szef floty."
-      />
+      >
+        <Link
+          to="/usterki?nowe=1"
+          className="press inline-flex h-10 items-center gap-2 rounded-control border border-line-strong bg-surface px-4 text-[0.9375rem] font-medium text-ink hover:bg-sunken"
+        >
+          <Wrench size={16} />
+          Zgłoś usterkę
+        </Link>
+      </PageHeader>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start">
         <Panel
           title="Najbliższe zmiany"

@@ -8,10 +8,10 @@ import type { Params } from "../domain/types";
 import { useFleet } from "../store/useFleet";
 import { toast } from "../ui/Toast";
 import {
-  ADMIN_EMAIL,
   cloudConfigured,
   describeError,
   fetchDriverSnapshot,
+  fetchRole,
   fetchSnapshot,
   linkSession,
   onQueueChange,
@@ -39,8 +39,12 @@ interface SessionState {
   phase: Phase;
   user: { id: string; email: string } | null;
   role: Role;
+  /** Operator aplikacji: zaprasza właścicieli flot. */
+  operator: boolean;
   /** Karta kierowcy zalogowanego konta (rola driver). */
   meId: string | null;
+  /** Konto właściciela floty, w której działa zalogowany (admin: on sam). */
+  fleetOwner: string | null;
   /** Użytkownik wszedł z linku do zmiany hasła albo z zaproszenia. */
   recovery: boolean;
   /** Wejście z zaproszenia: pierwsze ustawienie hasła. */
@@ -56,7 +60,9 @@ export const useSession = create<SessionState>(() => ({
   phase: cloudConfigured ? "booting" : "ready",
   user: null,
   role: "admin",
+  operator: false,
   meId: null,
+  fleetOwner: null,
   recovery: false,
   invited: false,
   loadError: null,
@@ -89,9 +95,6 @@ let currentUser: string | null = null;
 let linkPending = false;
 let currentRole: Role = "admin";
 
-const roleFor = (email: string | undefined): Role =>
-  (email ?? "").trim().toLowerCase() === ADMIN_EMAIL ? "admin" : "driver";
-
 function applyDriverSnapshot(s: DriverSnapshot) {
   useFleet.setState({
     vehicles: s.vehicles,
@@ -103,7 +106,7 @@ function applyDriverSnapshot(s: DriverSnapshot) {
     demo: false,
   });
   lastFetch = Date.now();
-  useSession.setState({ role: s.me ? "driver" : "unlinked", meId: s.me?.id ?? null });
+  useSession.setState({ role: s.me ? "driver" : "unlinked", meId: s.me?.id ?? null, fleetOwner: s.fleetOwner });
 }
 
 /** Pobiera dane właściwe dla roli zalogowanego konta. */
@@ -112,7 +115,7 @@ async function fetchFor(role: Role) {
     const snap = await fetchSnapshot();
     return () => {
       applySnapshot(snap);
-      useSession.setState({ role: "admin", meId: null });
+      useSession.setState({ role: "admin", meId: null, fleetOwner: currentUser });
     };
   }
   const snap = await fetchDriverSnapshot();
@@ -134,19 +137,29 @@ function applySnapshot(s: Awaited<ReturnType<typeof fetchSnapshot>>) {
   lastFetch = Date.now();
 }
 
+/* Rolę wyznacza baza: lista właścicieli flot i karty kierowców.
+   Aplikacja nie zna żadnego adresu administratora. */
+async function resolveRole(): Promise<Role> {
+  const role = await fetchRole();
+  useSession.setState({ operator: role === "operator" });
+  return role === "operator" || role === "admin" ? "admin" : "driver";
+}
+
 async function loadAccount(session: Session) {
   currentUser = session.user.id;
-  currentRole = roleFor(session.user.email);
   /* Od tej chwili zmiany nie nadpisują danych zapisanych w przeglądarce. */
   setCloud(true);
   useSession.setState({
     mode: "cloud",
     phase: "loading",
     loadError: null,
-    role: currentRole,
+    role: "driver",
+    operator: false,
     user: { id: session.user.id, email: session.user.email ?? "" },
   });
   try {
+    currentRole = await resolveRole();
+    if (currentUser !== session.user.id) return;
     const apply = await fetchFor(currentRole);
     if (currentUser !== session.user.id) return;
     apply();
@@ -169,7 +182,9 @@ function toSignedOut() {
     phase: guest ? "ready" : "signed-out",
     user: null,
     role: "admin",
+    operator: false,
     meId: null,
+    fleetOwner: null,
     ...(linkPending ? {} : { recovery: false, invited: false }),
     loadError: null,
   });
@@ -183,6 +198,8 @@ export async function refreshAccount(silent = true) {
   const user = currentUser;
   if (!silent) useSession.setState({ phase: "loading", loadError: null });
   try {
+    /* Rola mogła się zmienić (np. operator dodał konto do właścicieli flot). */
+    currentRole = await resolveRole();
     const apply = await fetchFor(currentRole);
     if (currentUser !== user || !queueIdle()) return;
     apply();
@@ -298,7 +315,7 @@ export async function signOut() {
 export function continueAsGuest() {
   writeGuest(true);
   setCloud(false);
-  useSession.setState({ mode: "guest", phase: "ready", role: "admin", meId: null });
+  useSession.setState({ mode: "guest", phase: "ready", role: "admin", operator: false, meId: null });
 }
 
 export function leaveGuest() {

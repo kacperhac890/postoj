@@ -58,26 +58,59 @@ logowanie), `src/data/rows.ts` (zamiana obiektów na wiersze tabel, z testami).
   dniówkę zaraz po nocce, i kopiuje poprzedni tydzień jednym przyciskiem.
 - **Rozliczenia** pokazują kierowców, którzy mieli zmiany w grafiku. Auto w rozliczeniu podpowiada się
   z grafiku (najczęstsze w tygodniu) i można je zmienić; od auta zależy, czy liczymy procent, czy wynajem.
-- **Role.** Konto `kacperhac890@gmail.com` jest administratorem (adres w `supabase/schema.sql`,
-  funkcja `postoj_is_admin`, i w `src/data/cloud.ts`, `ADMIN_EMAIL`). Każde inne konto to kierowca:
-  w karcie kierowcy wpisuje się jego e-mail, a po zalogowaniu na ten adres widzi grafik, flotę bez kosztów
-  i tylko swoje rozliczenia. Niczego nie może zmienić. Pilnuje tego baza (RLS i widoki), nie tylko ekran.
-- Konto z adresem, którego nie ma w żadnej karcie kierowcy, widzi tylko prośbę o przypisanie.
-- **Zaproszenia.** Konta kierowców zakłada administrator: w karcie kierowcy wpisuje e-mail i wybiera
-  „Wyślij e-mailem” albo „Skopiuj link zaproszenia” (do wysłania SMS-em). Kierowca klika link, ustawia
-  hasło i jest zalogowany. Wysyłkę robi Edge Function `supabase/functions/invite-driver` (klucz
-  administratora Supabase zostaje na serwerze). Na ekranie logowania nie ma samodzielnej rejestracji.
+- **Role.** O roli decyduje baza, aplikacja nie zna żadnego adresu na stałe:
+  - **operator aplikacji** (Ty): zarządza własną flotą i zaprasza właścicieli innych flot
+    (Ustawienia → Właściciele flot);
+  - **właściciel floty**: adres jest w tabeli `postoj_owners`. Zarządza tylko swoją flotą i sam zaprasza
+    swoich kierowców. Floty są rozdzielone w bazie: właściciel nie widzi cudzych danych, operator też nie;
+  - **kierowca**: jego e-mail jest w karcie kierowcy. Widzi grafik, flotę bez kosztów i tylko swoje
+    rozliczenia, zgłasza usterki. Niczego poza tym nie zmieni. Pilnuje tego baza (RLS), nie tylko ekran.
+- Konto z adresem, którego nie ma ani na liście właścicieli, ani w żadnej karcie kierowcy, widzi tylko
+  prośbę o przypisanie. Jeden adres e-mail może należeć tylko do jednego kierowcy w całej aplikacji.
+- **Zaproszenia.** Konta kierowców zakłada właściciel floty: w karcie kierowcy wpisuje e-mail i wybiera
+  „Wyślij e-mailem” albo „Skopiuj link zaproszenia” (do wysłania SMS-em). Właścicieli flot tak samo
+  zaprasza operator w Ustawieniach. Zaproszony klika link, ustawia hasło i jest zalogowany. Wysyłkę robi
+  Edge Function `supabase/functions/invite-driver` (klucz administratora Supabase zostaje na serwerze).
+  Na ekranie logowania nie ma samodzielnej rejestracji.
 
-### Wdrożenie funkcji zaproszeń
+## Usterki
 
-1. Supabase → Edge Functions → Deploy a new function → Via Editor. Nazwa: `invite-driver`.
-   Wklej `supabase/functions/invite-driver/index.ts` i kliknij Deploy.
-2. W ustawieniach funkcji wyłącz weryfikację JWT („Verify JWT”). Funkcja sama sprawdza, czy wołający
-   jest administratorem.
+Kierowca zgłasza usterkę auta (`/usterki`, także z pulpitu): wybiera auto, pisze, co się dzieje, i może
+zaznaczyć, że auto nie nadaje się do jazdy. Przy zgłoszeniu jest rozmowa z szefem floty. Szef odpisuje,
+ustawia stan (zgłoszone, w naprawie, naprawione) i widzi otwarte usterki na pulpicie i przy autach we Flocie.
+Nowe wiadomości przychodzą na żywo (Supabase Realtime), a licznik przy ikonie usterek pokazuje nieprzeczytane.
+Kierowca widzi tylko swoje zgłoszenia. Podpis i autora wiadomości ustawia baza, więc nie da się podszyć
+pod szefa. Odpowiedź kierowcy w naprawionym zgłoszeniu otwiera je ponownie. Bez konta (gość) usterki są
+zapisane w przeglądarce, z przykładowymi rozmowami przy danych przykładowych.
+
+### Wdrożenie (po każdej zmianie tych plików)
+
+1. Supabase → SQL Editor: uruchom cały `supabase/schema.sql`. Konto, które ma już dane floty, zostaje
+   automatycznie operatorem. Na zupełnie pustej bazie dopisz siebie jedną komendą:
+   `insert into public.postoj_owners (email, operator) values ('twoj@adres.pl', true);`
+2. Supabase → Edge Functions → `invite-driver` → Code: wklej `supabase/functions/invite-driver/index.ts`,
+   Deploy. Pierwszy raz: Deploy a new function → Via Editor, nazwa `invite-driver`. W ustawieniach funkcji
+   wyłącz weryfikację JWT („Verify JWT”): funkcja sama sprawdza uprawnienia w bazie.
 3. Authentication → Sign In / Providers: wyłącz „Allow new users to sign up”. Zaproszenia działają dalej.
 4. Wbudowana poczta Supabase wysyła tylko do członków zespołu projektu i kilka e-maili na godzinę.
-   Żeby zaproszenia e-mailem docierały do kierowców, ustaw własny SMTP (Authentication → Emails → SMTP),
-   albo używaj „Skopiuj link zaproszenia”.
+   Żeby zaproszenia e-mailem docierały, ustaw własny SMTP (Authentication → Emails → SMTP), albo używaj
+   „Skopiuj link”.
+
+## Bezpieczeństwo
+
+- Dostęp do danych pilnuje baza: zasady RLS na każdej tabeli, osobne widoki dla kierowców bez kosztów
+  i danych kolegów, funkcje zamknięte dla niezalogowanych. Klucz publiczny w przeglądarce jest jawny
+  z założenia i bez zalogowania nie daje dostępu do niczego.
+- Rolę ustala baza (`postoj_my_role`), w kodzie strony nie ma żadnego adresu administratora.
+- Strona ma zasady bezpieczeństwa treści (CSP): skrypty tylko z tej strony, połączenia tylko do własnego
+  projektu Supabase. Nie daje się osadzić w cudzej ramce, nie przekazuje adresu dalej (referrer)
+  i nie jest indeksowana przez wyszukiwarki.
+- Limity w bazie: najwyżej 15 wiadomości na minutę i 10 zgłoszeń na godzinę na konto.
+- Do zrobienia w panelu Supabase: wyłączona rejestracja (wyżej), Authentication → URL Configuration
+  z adresem strony jako jedynym Redirect URL, minimalna długość hasła 8 znaków (Authentication →
+  Providers → Email) i potwierdzanie zmiany adresu e-mail („Secure email change”).
+- Testy uprawnień: `supabase/schema.sql` sprawdzany na prawdziwym Postgresie (PGlite) z kontami
+  operatora, drugiego właściciela, kierowców, obcego i niezalogowanego.
 
 ## Paliwo i właściciel za kierownicą
 

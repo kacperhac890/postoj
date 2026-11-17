@@ -9,13 +9,24 @@ import { Calculator } from "./pages/Calculator";
 import { Dashboard } from "./pages/Dashboard";
 import { Drivers } from "./pages/Drivers";
 import { Fleet } from "./pages/Fleet";
+import { Issues } from "./pages/Issues";
 import { Login, Splash } from "./pages/Login";
 import { Schedule } from "./pages/Schedule";
 import { Settings } from "./pages/Settings";
 import { Settlements } from "./pages/Settlements";
 import { Toaster } from "./ui/Toast";
 
-initSession();
+/* Strona nie daje się osadzić w cudzej ramce (ochrona przed podstawionym
+   klikaniem). GitHub Pages nie pozwala ustawić nagłówka, więc pilnuje tego skrypt. */
+const framed = (() => {
+  try {
+    return window.top !== window.self;
+  } catch {
+    return true;
+  }
+})();
+
+if (!framed) initSession();
 
 /** Ekrany zarządzania: konto kierowcy wraca na pulpit. Bazę i tak chroni RLS. */
 function AdminOnly({ children }: { children: ReactNode }) {
@@ -42,6 +53,8 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="grafik" element={<Schedule />} />
           <Route path="flota" element={<Fleet />} />
+          <Route path="usterki" element={<Issues />} />
+          <Route path="usterki/:id" element={<Issues />} />
           <Route path="kierowcy" element={<AdminOnly><Drivers /></AdminOnly>} />
           <Route path="rozliczenia" element={<Settlements />} />
           <Route path="kalkulator" element={<AdminOnly><Calculator /></AdminOnly>} />
@@ -53,9 +66,13 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-    <Toaster />
-  </StrictMode>,
-);
+if (framed) {
+  document.getElementById("root")!.textContent = "Otwórz Postój w osobnej karcie przeglądarki.";
+} else {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+      <Toaster />
+    </StrictMode>,
+  );
+}

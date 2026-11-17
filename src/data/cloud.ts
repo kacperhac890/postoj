@@ -66,10 +66,43 @@ const T = {
   crew: "postoj_crew",
 } as const;
 
-/** Adres konta administratora floty. Musi być taki sam jak w supabase/schema.sql. */
-export const ADMIN_EMAIL = (
-  (import.meta.env.VITE_ADMIN_EMAIL as string | undefined)?.trim() || "kacperhac890@gmail.com"
-).toLowerCase();
+/** Rola konta według bazy (lista właścicieli flot i karty kierowców). */
+export type DbRole = "operator" | "admin" | "driver" | "unlinked";
+
+export async function fetchRole(): Promise<DbRole> {
+  const { data, error } = await db().rpc("postoj_my_role");
+  if (error) {
+    if (/postoj_my_role|could not find the function/i.test(error.message))
+      throw new Error("Baza wymaga aktualizacji. Uruchom ponownie plik supabase/schema.sql w Supabase (SQL Editor).");
+    throw error;
+  }
+  return (["operator", "admin", "driver"].includes(data as string) ? data : "unlinked") as DbRole;
+}
+
+export type InviteTarget = "driver" | "owner";
+export type InviteResult = { status: "invited" | "exists" | "link"; link?: string };
+
+/** Zaproszenie przez funkcję Edge invite-driver: e-mail albo link do wysłania samemu. */
+async function invite(email: string, delivery: "email" | "link", target: InviteTarget): Promise<InviteResult> {
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { data, error } = await db().functions.invoke("invite-driver", {
+    body: { email, redirectTo, delivery, target },
+  });
+  if (error) {
+    /* Treść błędu z funkcji jest w odpowiedzi; bez niej funkcja nie jest wdrożona. */
+    const ctx = (error as { context?: Response }).context;
+    let message = "";
+    try {
+      message = ctx ? ((await ctx.json()) as { error?: string }).error ?? "" : "";
+    } catch {
+      /* odpowiedź bez JSON */
+    }
+    if (!message && /failed to send|fetch|not found|404/i.test(error.message))
+      message = "Funkcja zaproszeń nie jest wdrożona w Supabase (invite-driver).";
+    throw new Error(message || error.message);
+  }
+  return data as InviteResult;
+}
 
 export interface CloudSnapshot extends FleetData {
   params: Partial<Params> | null;
@@ -102,6 +135,11 @@ export function describeError(err: unknown): string {
     return "W bazie brakuje tabel. Uruchom plik supabase/schema.sql w Supabase.";
   if (m.includes("jwt") || m.includes("not authenticated"))
     return "Sesja wygasła. Zaloguj się ponownie.";
+  if (m.includes("postoj_drivers_email_global"))
+    return "Ten adres e-mail ma już kierowca w innej flocie. Kierowca potrzebuje osobnego adresu.";
+  if (m.includes("postoj_drivers_email")) return "Ten adres e-mail ma już inny kierowca.";
+  if (m.includes("row-level security") || m.includes("permission denied"))
+    return "Brak uprawnień do tej zmiany. Zaloguj się ponownie albo poproś szefa floty.";
   return raw || "Coś poszło nie tak.";
 }
 
@@ -145,6 +183,8 @@ export async function fetchSnapshot(): Promise<CloudSnapshot> {
 export interface DriverSnapshot extends FleetData {
   /** Karta zalogowanego kierowcy albo null, gdy konto nie jest przypisane. */
   me: Driver | null;
+  /** Konto właściciela floty, do której należy kierowca. */
+  fleetOwner: string | null;
   params: Partial<Params> | null;
 }
 
@@ -155,8 +195,9 @@ export interface DriverSnapshot extends FleetData {
 export async function fetchDriverSnapshot(): Promise<DriverSnapshot> {
   const mine = await selectAll(T.drivers);
   if (mine.length === 0)
-    return { me: null, vehicles: [], drivers: [], entries: [], schedule: [], params: null };
+    return { me: null, fleetOwner: null, vehicles: [], drivers: [], entries: [], schedule: [], params: null };
   const me = rowToDriver(mine[0]);
+  const fleetOwner = String(mine[0].owner ?? "") || null;
 
   const [cars, crew, entries, schedule, params] = await Promise.all([
     selectAll(T.fleetCars),
@@ -175,6 +216,7 @@ export async function fetchDriverSnapshot(): Promise<DriverSnapshot> {
   );
   return {
     me,
+    fleetOwner,
     vehicles,
     drivers,
     entries: entries.map(rowToEntry).filter((x) => x.driverId === me.id),
@@ -283,26 +325,29 @@ export const api = {
       .insert(list.map((a) => ({ ...assignmentToRow(a), owner })));
   },
   /** Zaproszenie kierowcy: e-mail albo link do wysłania samemu (Edge Function). */
-  async inviteDriver(
-    email: string,
-    delivery: "email" | "link" = "email",
-  ): Promise<{ status: "invited" | "exists" | "link"; link?: string }> {
-    const redirectTo = `${window.location.origin}${window.location.pathname}`;
-    const { data, error } = await db().functions.invoke("invite-driver", { body: { email, redirectTo, delivery } });
-    if (error) {
-      /* Treść błędu z funkcji jest w odpowiedzi; bez niej funkcja nie jest wdrożona. */
-      const ctx = (error as { context?: Response }).context;
-      let message = "";
-      try {
-        message = ctx ? ((await ctx.json()) as { error?: string }).error ?? "" : "";
-      } catch {
-        /* odpowiedź bez JSON */
-      }
-      if (!message && /failed to send|fetch|not found|404/i.test(error.message))
-        message = "Funkcja zaproszeń nie jest wdrożona w Supabase (invite-driver).";
-      throw new Error(message || error.message);
-    }
-    return data as { status: "invited" | "exists" | "link"; link?: string };
+  inviteDriver(email: string, delivery: "email" | "link" = "email") {
+    return invite(email, delivery, "driver");
+  },
+  /** Zaproszenie właściciela floty. Tylko operator aplikacji. */
+  inviteOwner(email: string, delivery: "email" | "link" = "email") {
+    return invite(email, delivery, "owner");
+  },
+  /** Właściciele flot ze stanem kont. Tylko operator. */
+  async ownerAccounts() {
+    const { data, error } = await db().rpc("postoj_owner_accounts");
+    if (error) throw error;
+    return (data ?? []) as Array<{
+      email: string;
+      operator: boolean;
+      created_at: string;
+      invited_at: string | null;
+      confirmed_at: string | null;
+      last_sign_in_at: string | null;
+    }>;
+  },
+  async removeOwner(email: string) {
+    const { error } = await db().rpc("postoj_remove_owner", { p_email: email });
+    if (error) throw error;
   },
   /** Stan kont kierowców: zaproszony, potwierdzony, ostatnie logowanie. */
   async driverAccounts() {

@@ -7,6 +7,7 @@ import { MODE_LABEL, PREP_STEPS, STATUS_LABEL } from "../domain/labels";
 import { inWeek } from "../domain/schedule";
 import { currentWeek, weekNumber } from "../domain/week";
 import { useSession } from "../data/session";
+import { useIssues } from "../data/issues";
 import type { Mode, Vehicle, VehicleStatus } from "../domain/types";
 import { newId, useFleet } from "../store/useFleet";
 import { ListToolbar, NoMatches, fold } from "../ui/Filters";
@@ -84,6 +85,17 @@ export function Fleet() {
   const params = useFleet((s) => s.params);
   const saveVehicle = useFleet((s) => s.saveVehicle);
   const removeVehicle = useFleet((s) => s.removeVehicle);
+  const issues = useIssues((s) => s.issues);
+  /* Otwarte usterki przy aucie: liczba i czy auto stoi. */
+  const faults = useMemo(() => {
+    const m = new Map<string, { count: number; urgent: boolean }>();
+    for (const i of issues) {
+      if (i.status === "resolved") continue;
+      const f = m.get(i.vehicleId) ?? { count: 0, urgent: false };
+      m.set(i.vehicleId, { count: f.count + 1, urgent: f.urgent || i.urgent });
+    }
+    return m;
+  }, [issues]);
 
   const [draft, setDraft] = useState<Vehicle | null>(null);
   const shown = useRetained(draft);
@@ -260,6 +272,13 @@ export function Fleet() {
                         {v.status !== "active" ? (
                           <Badge tone={v.status === "service" ? "amber" : "neutral"}>
                             {STATUS_LABEL[v.status]}
+                          </Badge>
+                        ) : null}
+                        {faults.get(v.id) ? (
+                          <Badge tone={faults.get(v.id)!.urgent ? "red" : "amber"}>
+                            {faults.get(v.id)!.urgent
+                              ? "usterka, auto stoi"
+                              : `${faults.get(v.id)!.count} ${plural(faults.get(v.id)!.count, "usterka", "usterki", "usterek")}`}
                           </Badge>
                         ) : null}
                       </span>

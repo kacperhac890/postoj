@@ -8,6 +8,7 @@ import { plural } from "../domain/format";
 import type { Params } from "../domain/types";
 import { exportSnapshot, useFleet } from "../store/useFleet";
 import { Button, Field, NumberInput, PageHeader, Panel, TextInput, Toggle } from "../ui/kit";
+import { OwnersPanel } from "./Owners";
 
 export function Settings() {
   const params = useFleet((s) => s.params);
@@ -91,6 +92,7 @@ export function Settings() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
         {cloudConfigured ? <AccountPanel /> : null}
+        <OwnersPanel />
 
         <Panel title="Kierowcy na procent">
           <div className="grid grid-cols-2 gap-3">
