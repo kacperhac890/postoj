@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { carUsage, conflicts, copyWeek, driverWeeks, inWeek, mainVehicle, share, slotKey, weekDates } from "./schedule";
+import { carUsage, conflicts, copyWeek, driverWeeks, inWeek, mainVehicle, share, shortNames, slotKey, weekDates } from "./schedule";
 import { demoData } from "./seed";
 import type { Assignment, Vehicle } from "./types";
 
@@ -80,5 +80,20 @@ describe("wykorzystanie aut w grafiku", () => {
     expect(carUsage(list, "2026-W47").get("v1")).toEqual({ day: 2, night: 1 });
     expect(share(3, 14)).toBeCloseTo(3 / 14, 10);
     expect(share(0, 0)).toBe(0);
+  });
+});
+
+describe("shortNames", () => {
+  it("skraca nazwisko do inicjału i rozróżnia powtórki", () => {
+    const m = shortNames([
+      { id: "a", name: "Marek Kowalski" },
+      { id: "b", name: "Jan Nowak" },
+      { id: "c", name: "Jan Nowicki" },
+      { id: "d", name: "Zenek" },
+    ]);
+    expect(m.get("a")).toBe("Marek K.");
+    expect(m.get("b")).toBe("Jan Nowak");
+    expect(m.get("c")).toBe("Jan Nowicki");
+    expect(m.get("d")).toBe("Zenek");
   });
 });

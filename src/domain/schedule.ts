@@ -140,3 +140,16 @@ export function carUsage(list: Assignment[], week: string): Map<string, CarUsage
 
 /** Procent wykorzystania: obsadzone zmiany do możliwych. */
 export const share = (filled: number, possible: number) => (possible > 0 ? Math.min(1, filled / possible) : 0);
+
+/** Krótkie imię do ciasnej siatki: "Marek K.". Gdy dwóch kierowców
+    skróciłoby się tak samo, obaj zostają z pełnym imieniem i nazwiskiem. */
+export function shortNames(drivers: Array<{ id: string; name: string }>): Map<string, string> {
+  const short = (name: string) => {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length < 2) return parts[0] ?? "";
+    return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+  };
+  const seen = new Map<string, number>();
+  for (const d of drivers) seen.set(short(d.name), (seen.get(short(d.name)) ?? 0) + 1);
+  return new Map(drivers.map((d) => [d.id, (seen.get(short(d.name)) ?? 0) > 1 ? d.name.trim() : short(d.name)]));
+}
