@@ -1,16 +1,18 @@
 import { useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { CalendarBlank, CopySimple, Moon, Sun, Trash, Warning } from "@phosphor-icons/react";
-import { plural, toIso } from "../domain/format";
+import { pct, plural, toIso } from "../domain/format";
 import {
   DUTIES,
   DUTY_LABEL,
+  carUsage,
   conflicts,
   copyWeek,
   dayLabel,
   driverWeeks,
   inWeek,
   slotKey,
+  share,
   slotMap,
   weekDates,
 } from "../domain/schedule";
@@ -80,8 +82,16 @@ export function Schedule() {
     [vehicles, thisWeek],
   );
 
-  const capacity = cars.filter((v) => v.status === "active").length * 14;
-  const filled = thisWeek.length;
+  /* Wykorzystanie: obsadzone zmiany do możliwych (7 dniówek i 7 nocek na auto).
+     Flota liczona z aut, które jeżdżą. */
+  const usage = useMemo(() => carUsage(schedule, week), [schedule, week]);
+  const working = cars.filter((v) => v.status === "active");
+  const fleetDay = working.reduce((s, v) => s + (usage.get(v.id)?.day ?? 0), 0);
+  const fleetNight = working.reduce((s, v) => s + (usage.get(v.id)?.night ?? 0), 0);
+  const capacity = working.length * 14;
+  const filled = fleetDay + fleetNight;
+  const onDay = (date: string, duty: Duty) =>
+    working.filter((v) => slots.has(slotKey(date, v.id, duty))).length;
   const doubles = [...problems.entries()].filter(([k, c]) => c === "double" && dates.some((d) => k.startsWith(d))).length;
   const tired = [...problems.entries()].filter(([k, c]) => c === "rest" && dates.some((d) => k.startsWith(d))).length;
 
@@ -184,7 +194,7 @@ export function Schedule() {
         title="Grafik"
         lead={
           editable
-            ? `Obsadzone ${filled} z ${capacity} zmian w tygodniu. Na każde auto dniówka i nocka, kierowca wybierany na dzień.`
+            ? `Wykorzystanie aut ${pct(share(filled, capacity))}: dniówki ${pct(share(fleetDay, working.length * 7))}, nocki ${pct(share(fleetNight, working.length * 7))}. Obsadzone ${filled} z ${capacity} zmian.`
             : mine.length > 0
               ? `Masz w tym tygodniu ${mine.length} ${plural(mine.length, "zmianę", "zmiany", "zmian")}. Twoje pola są podświetlone.`
               : "W tym tygodniu nie masz zmian w grafiku."
@@ -245,10 +255,10 @@ export function Schedule() {
       {/* Komputer i tablet: cały tydzień w siatce */}
       <Panel flush className="hidden md:block">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px] border-collapse text-left">
+          <table className="w-full min-w-[940px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line">
-                <th scope="col" className="w-[150px] px-4 py-2.5 text-[0.75rem] font-medium text-ink-3">
+                <th scope="col" className="w-[132px] px-4 py-2.5 text-[0.75rem] font-medium text-ink-3">
                   Auto
                 </th>
                 {dates.map((date) => {
@@ -265,6 +275,9 @@ export function Schedule() {
                     </th>
                   );
                 })}
+                <th scope="col" className="w-[108px] border-l border-line px-3 py-2 text-[0.75rem] font-medium text-ink-3">
+                  Wykorzystanie
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -282,6 +295,10 @@ export function Schedule() {
                           <span className="text-[0.6875rem] text-ink-3">
                             {v.mode === "rental" ? "wynajem" : "na procent"}
                             {v.status === "service" ? ", w serwisie" : ""}
+                          </span>
+                          <span className="num text-[0.75rem] font-semibold text-ink">
+                            {pct(share((usage.get(v.id)?.day ?? 0) + (usage.get(v.id)?.night ?? 0), 14))}
+                            <span className="ml-1 font-normal text-ink-3">tygodnia</span>
                           </span>
                         </div>
                       </th>
@@ -301,10 +318,53 @@ export function Schedule() {
                         </div>
                       </td>
                     ))}
+                    <td className={cn("border-l border-line px-3", duty === "day" ? "pt-2" : "pb-2")}>
+                      <UsageCell filled={usage.get(v.id)?.[duty] ?? 0} possible={7} label={DUTY_LABEL[duty]} />
+                    </td>
                   </tr>
                 )),
               )}
             </tbody>
+            <tfoot>
+              {DUTIES.map((duty) => (
+                <tr key={duty} className={cn(duty === "day" ? "border-t-2 border-line" : undefined, "bg-bg/60")}>
+                  {duty === "day" ? (
+                    <th scope="rowgroup" rowSpan={2} className="border-r border-line px-4 py-2 align-middle font-normal">
+                      <span className="text-[0.8125rem] font-semibold text-ink">Cała flota</span>
+                      <span className="mt-0.5 block text-[0.6875rem] text-ink-3">
+                        {working.length} {plural(working.length, "auto jeździ", "auta jeżdżą", "aut jeździ")}
+                      </span>
+                    </th>
+                  ) : null}
+                  {dates.map((date) => {
+                    const n = onDay(date, duty);
+                    return (
+                      <td
+                        key={date}
+                        className={cn("px-2 py-1.5 text-[0.75rem]", date === today && "bg-green-soft/35")}
+                      >
+                        <span className="flex items-center gap-1">
+                          <DutyIcon duty={duty} className="shrink-0 opacity-70" />
+                          <span className="num text-ink-2">
+                            {n}/{working.length}
+                          </span>
+                          <span className={cn("num ml-auto font-medium", n < working.length ? "text-amber" : "text-green-ink")}>
+                            {pct(share(n, working.length))}
+                          </span>
+                        </span>
+                      </td>
+                    );
+                  })}
+                  <td className="border-l border-line px-3 py-1.5">
+                    <UsageCell
+                      filled={duty === "day" ? fleetDay : fleetNight}
+                      possible={working.length * 7}
+                      label={DUTY_LABEL[duty]}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tfoot>
           </table>
         </div>
       </Panel>
@@ -379,6 +439,28 @@ export function Schedule() {
         </Panel>
       </div>
 
+      {/* Telefon: wykorzystanie aut w tygodniu (na komputerze jest w siatce). */}
+      <Panel
+        title="Wykorzystanie aut w tygodniu"
+        aside={`flota ${pct(share(filled, capacity))}`}
+        flush
+        className="mt-4 md:hidden"
+      >
+        <ul>
+          {cars.map((v) => {
+            const u = usage.get(v.id) ?? { day: 0, night: 0 };
+            return (
+              <li key={v.id} className="grid grid-cols-[5.5rem_1fr_1fr_3rem] items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+                <Plate>{v.plate}</Plate>
+                <UsageCell filled={u.day} possible={7} label="Dniówki" icon="day" />
+                <UsageCell filled={u.night} possible={7} label="Nocki" icon="night" />
+                <span className="num text-right text-[0.875rem] font-semibold text-ink">{pct(share(u.day + u.night, 14))}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </Panel>
+
       {editable ? (
         <Panel title="Kierowcy w tym tygodniu" aside="zmiany i auta" flush className="mt-4">
           <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -436,5 +518,37 @@ function DriverOption({
       {d.name}
       {elsewhere ? ` (już na ${plates.get(elsewhere.id)})` : ""}
     </option>
+  );
+}
+
+/** Obsadzone zmiany z paskiem: 6/7 i 86%. */
+function UsageCell({
+  filled,
+  possible,
+  label,
+  icon,
+}: {
+  filled: number;
+  possible: number;
+  label: string;
+  icon?: Duty;
+}) {
+  const ratio = share(filled, possible);
+  return (
+    <div className="min-w-0" title={`${label}: ${filled} z ${possible}`}>
+      <div className="flex items-baseline justify-between gap-2 text-[0.75rem]">
+        <span className="num inline-flex items-center gap-1 text-ink-2">
+          {icon ? <DutyIcon duty={icon} /> : null}
+          {filled}/{possible}
+        </span>
+        <span className="num font-semibold text-ink">{pct(ratio)}</span>
+      </div>
+      <div className="mt-1 h-1 overflow-hidden rounded-full bg-sunken">
+        <div
+          className={cn("bar-grow h-full w-full rounded-full", ratio < 0.5 ? "bg-amber" : "bg-green")}
+          style={{ transform: `scaleX(${ratio})` }}
+        />
+      </div>
+    </div>
   );
 }

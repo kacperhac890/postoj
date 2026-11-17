@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conflicts, copyWeek, driverWeeks, inWeek, mainVehicle, slotKey, weekDates } from "./schedule";
+import { carUsage, conflicts, copyWeek, driverWeeks, inWeek, mainVehicle, share, slotKey, weekDates } from "./schedule";
 import { demoData } from "./seed";
 import type { Assignment, Vehicle } from "./types";
 
@@ -66,5 +66,19 @@ describe("grafik", () => {
       const worked = driverWeeks(d.schedule, week);
       for (const e of d.entries.filter((x) => x.week === week)) expect(worked.has(e.driverId)).toBe(true);
     }
+  });
+});
+
+describe("wykorzystanie aut w grafiku", () => {
+  it("liczy dniówki i nocki każdego auta w tygodniu", () => {
+    const list = [
+      a("2026-11-16", "v1", "day", "d1"),
+      a("2026-11-17", "v1", "day", "d1"),
+      a("2026-11-17", "v1", "night", "d2"),
+      a("2026-11-23", "v1", "night", "d2"), // następny tydzień
+    ];
+    expect(carUsage(list, "2026-W47").get("v1")).toEqual({ day: 2, night: 1 });
+    expect(share(3, 14)).toBeCloseTo(3 / 14, 10);
+    expect(share(0, 0)).toBe(0);
   });
 });

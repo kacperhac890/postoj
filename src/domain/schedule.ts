@@ -121,3 +121,22 @@ export function copyWeek(list: Assignment[], from: string, to: string, vehicles:
     .filter((a) => ok.has(a.vehicleId))
     .map((a) => ({ ...a, date: addDays(a.date, shift) }));
 }
+
+export interface CarUsage {
+  day: number;
+  night: number;
+}
+
+/** Ile dniówek i nocek ma obsadzonych każde auto w tygodniu (na 7 możliwych każdej). */
+export function carUsage(list: Assignment[], week: string): Map<string, CarUsage> {
+  const out = new Map<string, CarUsage>();
+  for (const a of inWeek(list, week)) {
+    const u = out.get(a.vehicleId) ?? { day: 0, night: 0 };
+    u[a.duty] += 1;
+    out.set(a.vehicleId, u);
+  }
+  return out;
+}
+
+/** Procent wykorzystania: obsadzone zmiany do możliwych. */
+export const share = (filled: number, possible: number) => (possible > 0 ? Math.min(1, filled / possible) : 0);
