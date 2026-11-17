@@ -208,6 +208,25 @@ as $$
   limit 1
 $$;
 
+-- Stan kont kierowców dla administratora: zaproszony, aktywny, ostatnie logowanie.
+-- Zwraca tylko adresy wpisane w kartach kierowców jego floty.
+create or replace function public.postoj_driver_accounts()
+returns table (email text, invited_at timestamptz, confirmed_at timestamptz, last_sign_in_at timestamptz)
+language sql stable security definer
+set search_path = ''
+as $$
+  select lower(u.email), u.invited_at, u.email_confirmed_at, u.last_sign_in_at
+  from auth.users u
+  where public.postoj_is_admin()
+    and lower(u.email) in (
+      select lower(d.email) from public.postoj_drivers d
+      where d.owner = auth.uid() and d.email <> ''
+    )
+$$;
+
+revoke execute on function public.postoj_driver_accounts() from public, anon;
+grant execute on function public.postoj_driver_accounts() to authenticated;
+
 revoke execute on function public.postoj_confirmed_email() from public, anon;
 revoke execute on function public.postoj_is_admin() from public, anon;
 revoke execute on function public.postoj_my_driver() from public, anon;

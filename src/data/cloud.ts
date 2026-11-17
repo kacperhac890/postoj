@@ -15,6 +15,8 @@ import {
   vehicleToRow,
 } from "./rows";
 import type { Row } from "./rows";
+import { parseAuthHash } from "./link";
+export type { LinkSession } from "./link";
 
 /* Połączenie z bazą (Supabase). Adres i klucz publiczny przychodzą
    z build-time env. Bez nich aplikacja działa jak dotąd: lokalnie,
@@ -25,6 +27,19 @@ const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
 const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim();
 
 export const cloudConfigured = Boolean(url && key);
+
+/* Link z zaproszenia (i z innych e-maili wysłanych przez serwer) wraca z sesją
+   w części adresu po "#": #access_token=...&type=invite. Klient w trybie PKCE
+   takiego adresu nie przyjmuje, a HashRouter wziąłby go za ścieżkę. Dlatego
+   odczytujemy go tutaj, zanim powstanie klient, i od razu czyścimy adres. */
+const fromLink = typeof window !== "undefined" ? parseAuthHash(window.location.hash) : { session: null, error: null };
+if (fromLink.session || fromLink.error)
+  window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/`);
+
+/** Sesja przyniesiona w linku z e-maila (zaproszenie), do przejęcia po starcie. */
+export const linkSession = fromLink.session;
+/** Błąd przyniesiony w linku, np. wygasłe zaproszenie. */
+export const linkError = fromLink.error;
 
 export const supabase: SupabaseClient | null = cloudConfigured
   ? createClient(url!, key!, {
@@ -266,6 +281,39 @@ export const api = {
     return db()
       .from(T.schedule)
       .insert(list.map((a) => ({ ...assignmentToRow(a), owner })));
+  },
+  /** Zaproszenie kierowcy: e-mail albo link do wysłania samemu (Edge Function). */
+  async inviteDriver(
+    email: string,
+    delivery: "email" | "link" = "email",
+  ): Promise<{ status: "invited" | "exists" | "link"; link?: string }> {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { data, error } = await db().functions.invoke("invite-driver", { body: { email, redirectTo, delivery } });
+    if (error) {
+      /* Treść błędu z funkcji jest w odpowiedzi; bez niej funkcja nie jest wdrożona. */
+      const ctx = (error as { context?: Response }).context;
+      let message = "";
+      try {
+        message = ctx ? ((await ctx.json()) as { error?: string }).error ?? "" : "";
+      } catch {
+        /* odpowiedź bez JSON */
+      }
+      if (!message && /failed to send|fetch|not found|404/i.test(error.message))
+        message = "Funkcja zaproszeń nie jest wdrożona w Supabase (invite-driver).";
+      throw new Error(message || error.message);
+    }
+    return data as { status: "invited" | "exists" | "link"; link?: string };
+  },
+  /** Stan kont kierowców: zaproszony, potwierdzony, ostatnie logowanie. */
+  async driverAccounts() {
+    const { data, error } = await db().rpc("postoj_driver_accounts");
+    if (error) throw error;
+    return (data ?? []) as Array<{
+      email: string;
+      invited_at: string | null;
+      confirmed_at: string | null;
+      last_sign_in_at: string | null;
+    }>;
   },
   async saveSettings(params: Params, scenario: Scenario, demo: boolean) {
     const owner = await uid();

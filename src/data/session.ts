@@ -13,6 +13,7 @@ import {
   describeError,
   fetchDriverSnapshot,
   fetchSnapshot,
+  linkSession,
   onQueueChange,
   queueIdle,
   supabase,
@@ -40,8 +41,10 @@ interface SessionState {
   role: Role;
   /** Karta kierowcy zalogowanego konta (rola driver). */
   meId: string | null;
-  /** Użytkownik wszedł z linku do zmiany hasła. */
+  /** Użytkownik wszedł z linku do zmiany hasła albo z zaproszenia. */
   recovery: boolean;
+  /** Wejście z zaproszenia: pierwsze ustawienie hasła. */
+  invited: boolean;
   loadError: string | null;
   /** Zapisy w drodze do bazy i ostatni błąd. */
   pending: number;
@@ -55,6 +58,7 @@ export const useSession = create<SessionState>(() => ({
   role: "admin",
   meId: null,
   recovery: false,
+  invited: false,
   loadError: null,
   pending: 0,
   syncError: null,
@@ -80,6 +84,9 @@ const writeGuest = (on: boolean) => {
 };
 
 let currentUser: string | null = null;
+/* Sesja z linku w e-mailu jest właśnie przejmowana: zdarzenie startowe
+   "brak sesji" nie może wtedy zamknąć ekranu ustawiania hasła. */
+let linkPending = false;
 let currentRole: Role = "admin";
 
 const roleFor = (email: string | undefined): Role =>
@@ -163,7 +170,7 @@ function toSignedOut() {
     user: null,
     role: "admin",
     meId: null,
-    recovery: false,
+    ...(linkPending ? {} : { recovery: false, invited: false }),
     loadError: null,
   });
 }
@@ -205,6 +212,7 @@ export function initSession() {
     window.setTimeout(() => {
       if (event === "PASSWORD_RECOVERY") useSession.setState({ recovery: true });
       if (session) {
+        linkPending = false;
         if (session.user.id !== currentUser) {
           writeGuest(false);
           void loadAccount(session);
@@ -216,6 +224,23 @@ export function initSession() {
       }
     }, 0);
   });
+
+  /* Zaproszony kierowca wchodzi z sesją w linku: przejmujemy ją i prosimy
+     o ustawienie hasła, zanim zobaczy aplikację. */
+  if (linkSession) {
+    if (linkSession.type === "invite" || linkSession.type === "recovery")
+      useSession.setState({ recovery: true, invited: linkSession.type === "invite" });
+    linkPending = true;
+    void supabase.auth
+      .setSession({ access_token: linkSession.access_token, refresh_token: linkSession.refresh_token })
+      .then(({ error }) => {
+        if (error) {
+          linkPending = false;
+          useSession.setState({ recovery: false, invited: false });
+          toast.error("Link z e-maila wygasł albo został już użyty. Poproś o nowe zaproszenie.");
+        }
+      });
+  }
 
   /* Dane mogły się zmienić na innym urządzeniu. */
   document.addEventListener("visibilitychange", () => {
@@ -261,7 +286,7 @@ export async function sendReset(email: string) {
 export async function setNewPassword(password: string) {
   const { error } = await client().auth.updateUser({ password });
   if (error) throw error;
-  useSession.setState({ recovery: false });
+  useSession.setState({ recovery: false, invited: false });
 }
 
 export async function signOut() {

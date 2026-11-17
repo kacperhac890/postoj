@@ -63,6 +63,21 @@ logowanie), `src/data/rows.ts` (zamiana obiektów na wiersze tabel, z testami).
   w karcie kierowcy wpisuje się jego e-mail, a po zalogowaniu na ten adres widzi grafik, flotę bez kosztów
   i tylko swoje rozliczenia. Niczego nie może zmienić. Pilnuje tego baza (RLS i widoki), nie tylko ekran.
 - Konto z adresem, którego nie ma w żadnej karcie kierowcy, widzi tylko prośbę o przypisanie.
+- **Zaproszenia.** Konta kierowców zakłada administrator: w karcie kierowcy wpisuje e-mail i wybiera
+  „Wyślij e-mailem” albo „Skopiuj link zaproszenia” (do wysłania SMS-em). Kierowca klika link, ustawia
+  hasło i jest zalogowany. Wysyłkę robi Edge Function `supabase/functions/invite-driver` (klucz
+  administratora Supabase zostaje na serwerze). Na ekranie logowania nie ma samodzielnej rejestracji.
+
+### Wdrożenie funkcji zaproszeń
+
+1. Supabase → Edge Functions → Deploy a new function → Via Editor. Nazwa: `invite-driver`.
+   Wklej `supabase/functions/invite-driver/index.ts` i kliknij Deploy.
+2. W ustawieniach funkcji wyłącz weryfikację JWT („Verify JWT”). Funkcja sama sprawdza, czy wołający
+   jest administratorem.
+3. Authentication → Sign In / Providers: wyłącz „Allow new users to sign up”. Zaproszenia działają dalej.
+4. Wbudowana poczta Supabase wysyła tylko do członków zespołu projektu i kilka e-maili na godzinę.
+   Żeby zaproszenia e-mailem docierały do kierowców, ustaw własny SMTP (Authentication → Emails → SMTP),
+   albo używaj „Skopiuj link zaproszenia”.
 
 ## Paliwo i właściciel za kierownicą
 

@@ -32,6 +32,8 @@ const DutyIcon = ({ duty, className }: { duty: Duty; className?: string }) =>
     <Moon size={14} weight="fill" className={cn("text-green-deep-2", className)} aria-hidden="true" />
   );
 
+const ORDER = { active: 0, service: 1, idle: 2 } as const;
+
 const CONFLICT_TEXT: Record<Conflict, string> = {
   double: "Ten kierowca ma w tym czasie inne auto",
   rest: "Bez odpoczynku między nocką a dniówką",
@@ -72,20 +74,18 @@ export function Schedule() {
     [drivers],
   );
 
-  /* W grafiku są auta, które jeżdżą albo stoją w serwisie, oraz każde auto
-     z wpisami w tym tygodniu. */
+  /* W grafiku są wszystkie auta: najpierw jeżdżące, potem w serwisie,
+     na końcu stojące. Status nie blokuje wpisania kierowcy. */
   const cars = useMemo(
-    () =>
-      vehicles
-        .filter((v) => v.status !== "idle" || thisWeek.some((a) => a.vehicleId === v.id))
-        .sort((a, b) => a.plate.localeCompare(b.plate)),
-    [vehicles, thisWeek],
+    () => [...vehicles].sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.plate.localeCompare(b.plate)),
+    [vehicles],
   );
 
   /* Wykorzystanie: obsadzone zmiany do możliwych (7 dniówek i 7 nocek na auto).
      Flota liczona z aut, które jeżdżą. */
   const usage = useMemo(() => carUsage(schedule, week), [schedule, week]);
-  const working = cars.filter((v) => v.status === "active");
+  /* Flota w procentach: auta, które jeżdżą, i każde auto z wpisami w tym tygodniu. */
+  const working = cars.filter((v) => v.status === "active" || usage.has(v.id));
   const fleetDay = working.reduce((s, v) => s + (usage.get(v.id)?.day ?? 0), 0);
   const fleetNight = working.reduce((s, v) => s + (usage.get(v.id)?.night ?? 0), 0);
   const capacity = working.length * 14;
@@ -226,6 +226,47 @@ export function Schedule() {
         </div>
       ) : null}
 
+      {/* Wykorzystanie aut: na górze, widoczne od razu na każdym ekranie. */}
+      <Panel
+        title="Wykorzystanie aut"
+        aside={
+          working.length > 0 ? (
+            <span className="num">
+              flota <span className="font-semibold text-ink">{pct(share(filled, capacity))}</span>
+              <span className="hidden sm:inline">
+                {" "}
+                · dniówki {pct(share(fleetDay, working.length * 7))} · nocki {pct(share(fleetNight, working.length * 7))}
+              </span>
+            </span>
+          ) : null
+        }
+        flush
+        className="mb-4"
+      >
+        <ul className="grid grid-cols-1 lg:grid-cols-2">
+          {cars.map((v, i) => {
+            const u = usage.get(v.id) ?? { day: 0, night: 0 };
+            return (
+              <li
+                key={v.id}
+                style={{ "--i": i } as CSSProperties}
+                className={cn(
+                  "stagger-item grid grid-cols-[5.75rem_1fr_1fr_3.25rem] items-center gap-3 border-b border-line px-4 py-2.5 md:px-5 lg:odd:border-r",
+                  v.status === "idle" && !usage.has(v.id) && "opacity-55",
+                )}
+              >
+                <Plate>{v.plate}</Plate>
+                <UsageCell filled={u.day} possible={7} label="Dniówki" icon="day" />
+                <UsageCell filled={u.night} possible={7} label="Nocki" icon="night" />
+                <span className="num text-right text-[0.9375rem] font-semibold text-ink">
+                  {pct(share(u.day + u.night, 14))}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Panel>
+
       {/* Kierowca na telefonie: najpierw własne zmiany. */}
       {!editable && mine.length > 0 ? (
         <Panel title="Twoje zmiany" flush className="mb-4">
@@ -294,7 +335,7 @@ export function Schedule() {
                           <Plate>{v.plate}</Plate>
                           <span className="text-[0.6875rem] text-ink-3">
                             {v.mode === "rental" ? "wynajem" : "na procent"}
-                            {v.status === "service" ? ", w serwisie" : ""}
+                            {v.status === "service" ? ", w serwisie" : v.status === "idle" ? ", nie jeździ" : ""}
                           </span>
                           <span className="num text-[0.75rem] font-semibold text-ink">
                             {pct(share((usage.get(v.id)?.day ?? 0) + (usage.get(v.id)?.night ?? 0), 14))}
@@ -438,28 +479,6 @@ export function Schedule() {
           </ul>
         </Panel>
       </div>
-
-      {/* Telefon: wykorzystanie aut w tygodniu (na komputerze jest w siatce). */}
-      <Panel
-        title="Wykorzystanie aut w tygodniu"
-        aside={`flota ${pct(share(filled, capacity))}`}
-        flush
-        className="mt-4 md:hidden"
-      >
-        <ul>
-          {cars.map((v) => {
-            const u = usage.get(v.id) ?? { day: 0, night: 0 };
-            return (
-              <li key={v.id} className="grid grid-cols-[5.5rem_1fr_1fr_3rem] items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
-                <Plate>{v.plate}</Plate>
-                <UsageCell filled={u.day} possible={7} label="Dniówki" icon="day" />
-                <UsageCell filled={u.night} possible={7} label="Nocki" icon="night" />
-                <span className="num text-right text-[0.875rem] font-semibold text-ink">{pct(share(u.day + u.night, 14))}</span>
-              </li>
-            );
-          })}
-        </ul>
-      </Panel>
 
       {editable ? (
         <Panel title="Kierowcy w tym tygodniu" aside="zmiany i auta" flush className="mt-4">

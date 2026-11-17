@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { ArrowLeft, Eye, EyeSlash, EnvelopeSimple } from "@phosphor-icons/react";
-import { describeError } from "../data/cloud";
+import { describeError, linkError } from "../data/cloud";
 import { continueAsGuest, sendReset, setNewPassword, signIn, signUp } from "../data/session";
 import { Mark } from "../layout/Mark";
 import { Button, Field, TextInput, cn } from "../ui/kit";
 import { Spinner } from "../ui/motion";
 import { toast } from "../ui/Toast";
 
-type View = "sign-in" | "sign-up" | "reset" | "sent" | "confirm" | "new-password";
+type View = "sign-in" | "sign-up" | "reset" | "sent" | "confirm" | "new-password" | "welcome";
 
 const TITLES: Record<View, { title: string; lead: string }> = {
   "sign-in": { title: "Zaloguj się", lead: "Auta, kierowcy i rozliczenia czekają na Twoim koncie." },
@@ -20,14 +20,18 @@ const TITLES: Record<View, { title: string; lead: string }> = {
   sent: { title: "Sprawdź skrzynkę", lead: "" },
   confirm: { title: "Potwierdź adres", lead: "" },
   "new-password": { title: "Ustaw nowe hasło", lead: "Wpisz hasło, którym będziesz się logować od teraz." },
+  welcome: {
+    title: "Witaj w Postoju",
+    lead: "Szef floty założył Ci konto. Ustaw hasło, a zobaczysz swój grafik i rozliczenia.",
+  },
 };
 
 /** Błąd przekazany w adresie po kliknięciu nieważnego lub wygasłego linku z e-maila. */
 function readUrlError() {
   const q = new URLSearchParams(window.location.search);
-  const msg = q.get("error_description");
+  const msg = q.get("error_description") ?? linkError;
   if (!msg) return null;
-  window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+  if (q.get("error_description")) window.history.replaceState(null, "", window.location.pathname + window.location.hash);
   return msg.toLowerCase().includes("expired")
     ? "Link wygasł albo został już użyty. Poproś o nowy."
     : "Link z wiadomości jest nieprawidłowy. Spróbuj jeszcze raz.";
@@ -48,6 +52,9 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
 
   useEffect(() => setView(initial), [initial]);
 
+  /* Ustawianie hasła: po zaproszeniu albo z linku do zmiany hasła. */
+  const settingPassword = view === "new-password" || view === "welcome";
+
   const go = (v: View) => {
     setView(v);
     setError(null);
@@ -57,11 +64,11 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
     e.preventDefault();
     setError(null);
     const mail = email.trim();
-    if (view !== "new-password" && !/^\S+@\S+\.\S+$/.test(mail)) {
+    if (!settingPassword && !/^\S+@\S+\.\S+$/.test(mail)) {
       setError("Wpisz poprawny adres e-mail.");
       return;
     }
-    if ((view === "sign-up" || view === "new-password") && password.length < 8) {
+    if ((view === "sign-up" || settingPassword) && password.length < 8) {
       setError("Hasło musi mieć co najmniej 8 znaków.");
       return;
     }
@@ -76,7 +83,7 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
         await sendReset(mail);
         go("sent");
       }
-      if (view === "new-password") {
+      if (settingPassword) {
         await setNewPassword(password);
         toast.ok("Hasło zmienione.");
       }
@@ -88,7 +95,7 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
   }
 
   const { title, lead } = TITLES[view];
-  const formView = view === "sign-in" || view === "sign-up" || view === "reset" || view === "new-password";
+  const formView = view === "sign-in" || view === "sign-up" || view === "reset" || settingPassword;
 
   return (
     <div className="min-h-dvh bg-bg lg:grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -130,7 +137,7 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
 
             {formView ? (
               <form onSubmit={submit} noValidate className="mt-7 flex flex-col gap-4">
-                {view !== "new-password" ? (
+                {!settingPassword ? (
                   <Field label="E-mail">
                     <TextInput
                       type="email"
@@ -149,8 +156,8 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
 
                 {view !== "reset" ? (
                   <Field
-                    label={view === "new-password" ? "Nowe hasło" : "Hasło"}
-                    hint={view === "sign-up" || view === "new-password" ? "Co najmniej 8 znaków." : undefined}
+                    label={settingPassword ? (view === "welcome" ? "Twoje hasło" : "Nowe hasło") : "Hasło"}
+                    hint={view === "sign-up" || settingPassword ? "Co najmniej 8 znaków." : undefined}
                   >
                     <span className="relative block">
                       <TextInput
@@ -159,7 +166,7 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="pr-11"
-                        autoFocus={view === "new-password"}
+                        autoFocus={settingPassword}
                         required
                       />
                       <button
@@ -199,22 +206,18 @@ export function Login({ initial = "sign-in" }: { initial?: View }) {
                       ? "Załóż konto"
                       : view === "reset"
                         ? "Wyślij link"
-                        : "Zapisz hasło"}
+                        : view === "welcome"
+                          ? "Ustaw hasło i wejdź"
+                          : "Zapisz hasło"}
                 </Button>
               </form>
             ) : null}
 
             {view === "sign-in" || view === "sign-up" ? (
               <>
-                <p className="mt-6 text-[0.875rem] text-ink-2">
-                  {view === "sign-in" ? "Pierwszy raz tutaj? " : "Masz już konto? "}
-                  <button
-                    type="button"
-                    onClick={() => go(view === "sign-in" ? "sign-up" : "sign-in")}
-                    className="font-medium text-green-ink underline-offset-4 hover:underline"
-                  >
-                    {view === "sign-in" ? "Załóż konto" : "Zaloguj się"}
-                  </button>
+                <p className="mt-6 text-[0.8125rem] leading-snug text-ink-2">
+                  Konta kierowców zakłada szef floty. Jeśli masz dostać dostęp, poszukaj w skrzynce e-maila z
+                  zaproszeniem i kliknij link, żeby ustawić hasło.
                 </p>
 
                 <div className="mt-8 border-t border-line pt-5">

@@ -26,9 +26,10 @@ function AdminOnly({ children }: { children: ReactNode }) {
 function App() {
   const phase = useSession((s) => s.phase);
   const recovery = useSession((s) => s.recovery);
+  const invited = useSession((s) => s.invited);
 
-  /* Link z e-maila do zmiany hasła loguje na chwilę: najpierw nowe hasło. */
-  if (recovery) return <Login initial="new-password" />;
+  /* Link z e-maila (zaproszenie, zmiana hasła) loguje na chwilę: najpierw hasło. */
+  if (recovery) return <Login initial={invited ? "welcome" : "new-password"} />;
   if (phase === "booting") return <Splash />;
   if (phase === "signed-out") return <Login />;
 

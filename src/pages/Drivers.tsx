@@ -1,7 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
-import { IdentificationCard, Plus } from "@phosphor-icons/react";
-import { num1, pct, plural, zl } from "../domain/format";
+import { EnvelopeSimple, IdentificationCard, LinkSimple, Plus } from "@phosphor-icons/react";
+import { api, describeError, flushQueue } from "../data/cloud";
+import { useSession } from "../data/session";
+import { Spinner } from "../ui/motion";
+import { num1, pct, plural, shortDate, zl } from "../domain/format";
 import { driverWeeks } from "../domain/schedule";
 import { currentWeek } from "../domain/week";
 import type { Driver, Shift } from "../domain/types";
@@ -36,6 +39,37 @@ const blank = (): Driver => ({
 
 const COLS = "md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.3fr)]";
 
+type Account = { invited_at: string | null; confirmed_at: string | null; last_sign_in_at: string | null };
+
+/** Stan kont kierowców z bazy (tylko admin zalogowany do bazy). */
+function useAccounts() {
+  const mode = useSession((s) => s.mode);
+  const role = useSession((s) => s.role);
+  const enabled = mode === "cloud" && role === "admin";
+  const [accounts, setAccounts] = useState<Map<string, Account>>(new Map());
+  const reload = useCallback(async () => {
+    if (!enabled) return;
+    try {
+      const list = await api.driverAccounts();
+      setAccounts(new Map(list.map((a) => [a.email.toLowerCase(), a])));
+    } catch {
+      /* Funkcji w bazie jeszcze nie ma: stan kont po prostu się nie pokaże. */
+    }
+  }, [enabled]);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+  return { enabled, accounts, reload };
+}
+
+function accountState(email: string, accounts: Map<string, Account>) {
+  if (!email.trim()) return null;
+  const a = accounts.get(email.trim().toLowerCase());
+  if (!a) return "none" as const;
+  if (a.last_sign_in_at || a.confirmed_at) return "active" as const;
+  return "invited" as const;
+}
+
 export function Drivers() {
   const drivers = useFleet((s) => s.drivers);
   const vehicles = useFleet((s) => s.vehicles);
@@ -46,6 +80,9 @@ export function Drivers() {
   const removeDriver = useFleet((s) => s.removeDriver);
 
   const [draft, setDraft] = useState<Driver | null>(null);
+  const { enabled: canInvite, accounts, reload } = useAccounts();
+  const [inviting, setInviting] = useState<"email" | "link" | null>(null);
+  const [inviteLink, setInviteLink] = useState<{ email: string; link: string } | null>(null);
   const shown = useRetained(draft);
   const isNew = shown ? !drivers.some((d) => d.id === shown.id) : false;
   const patch = (p: Partial<Driver>) => setDraft((d) => (d ? { ...d, ...p } : d));
@@ -100,6 +137,52 @@ export function Drivers() {
   const benched = drivers.filter((d) => d.active && !week.has(d.id)).length;
   const students = drivers.filter((d) => d.active && d.student && !d.owner).length;
   const entryCount = shown ? entries.filter((e) => e.driverId === shown.id).length : 0;
+
+  /* Zaproszenie: najpierw zapis karty z adresem (funkcja sprawdza, że adres
+     należy do kierowcy floty), potem wysyłka e-maila przez Supabase. */
+  async function invite(delivery: "email" | "link") {
+    if (!draft) return;
+    const email = draft.email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email) || !draft.name.trim()) {
+      toast.error("Wpisz imię i poprawny adres e-mail kierowcy.");
+      return;
+    }
+    const taken = drivers.find((d) => d.id !== draft.id && d.email.toLowerCase() === email);
+    if (taken) {
+      toast.error(`Ten e-mail ma już ${taken.name}.`);
+      return;
+    }
+    setInviting(delivery);
+    try {
+      const saved = drivers.find((d) => d.id === draft.id);
+      if (!saved || saved.email !== email || saved.name !== draft.name.trim()) {
+        saveDriver({ ...draft, name: draft.name.trim(), phone: draft.phone.trim(), email });
+        setDraft({ ...draft, email });
+        await flushQueue();
+      }
+      const res = await api.inviteDriver(email, delivery);
+      if (res.status === "link" && res.link) {
+        setInviteLink({ email, link: res.link });
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(res.link);
+          copied = true;
+        } catch {
+          /* Brak dostępu do schowka: link zostaje w polu do skopiowania ręcznie. */
+        }
+        toast.ok(copied ? "Link skopiowany. Wyślij go kierowcy SMS-em albo WhatsAppem." : "Link gotowy, skopiuj go z pola.");
+      } else if (res.status === "invited") {
+        toast.ok(`Zaproszenie wysłane na ${email}.`);
+      } else {
+        toast.ok(`${email} ma już konto. Jeśli kierowca nie ustawił hasła, skopiuj mu link zaproszenia.`);
+      }
+      await reload();
+    } catch (err) {
+      toast.error(describeError(err));
+    } finally {
+      setInviting(null);
+    }
+  }
 
   function save() {
     if (!draft || !draft.name.trim()) return;
@@ -232,11 +315,13 @@ export function Drivers() {
                         ) : (
                           <span className={d.active ? "text-amber" : "text-ink-3"}>Bez zmian w grafiku</span>
                         )}
-                        {d.email ? (
-                          <span className="text-[0.75rem] text-ink-3" title={`Konto: ${d.email}`}>
-                            · ma konto
-                          </span>
-                        ) : null}
+                        {(() => {
+                          const st = accountState(d.email, accounts);
+                          if (st === "active") return <Badge tone="green">konto aktywne</Badge>;
+                          if (st === "invited") return <Badge tone="amber">zaproszony</Badge>;
+                          if (st === "none" && canInvite) return <Badge>bez konta</Badge>;
+                          return null;
+                        })()}
                       </span>
 
                       <span className="num text-[0.9375rem] font-medium text-ink md:text-right">
@@ -325,7 +410,7 @@ export function Drivers() {
             </Field>
             <Field
               label="E-mail konta w aplikacji"
-              hint="Kierowca zakłada konto na ten adres i po zalogowaniu widzi grafik, flotę i tylko swoje rozliczenia. Niczego nie może zmienić."
+              hint="Na ten adres wyślesz zaproszenie. Kierowca ustawi hasło i zobaczy grafik, flotę i tylko swoje rozliczenia. Niczego nie może zmienić."
             >
               <TextInput
                 type="email"
@@ -338,6 +423,17 @@ export function Drivers() {
                 autoComplete="off"
               />
             </Field>
+            {shown.email.trim() ? (
+              <InviteBox
+                driver={shown}
+                state={accountState(shown.email, accounts)}
+                account={accounts.get(shown.email.trim().toLowerCase())}
+                enabled={canInvite}
+                busy={inviting}
+                link={inviteLink && inviteLink.email === shown.email.trim().toLowerCase() ? inviteLink.link : null}
+                onInvite={(d) => void invite(d)}
+              />
+            ) : null}
 
             <Toggle
               checked={shown.owner}
@@ -393,5 +489,68 @@ export function Drivers() {
         ) : null}
       </Sheet>
     </>
+  );
+}
+
+/** Zaproszenie i stan konta kierowcy w karcie kierowcy. */
+function InviteBox({
+  driver,
+  state,
+  account,
+  enabled,
+  busy,
+  link,
+  onInvite,
+}: {
+  driver: Driver;
+  state: ReturnType<typeof accountState>;
+  account: Account | undefined;
+  enabled: boolean;
+  busy: "email" | "link" | null;
+  link: string | null;
+  onInvite: (delivery: "email" | "link") => void;
+}) {
+  const when = (iso: string | null | undefined) => (iso ? shortDate(iso.slice(0, 10)) : "");
+  return (
+    <div className="-mt-2 flex flex-col gap-2.5 rounded-control bg-sunken px-3 py-3">
+      <div className="flex items-start gap-2.5 text-[0.8125rem] leading-snug">
+        <EnvelopeSimple size={17} className="mt-px shrink-0 text-ink-3" />
+        <span className="text-ink-2">
+          {!enabled
+            ? "Zaproszenia działają po zalogowaniu na konto administratora w bazie."
+            : state === "active"
+              ? `Konto aktywne${account?.last_sign_in_at ? `, ostatnie logowanie ${when(account.last_sign_in_at)}` : ""}. ${driver.name.split(" ")[0]} widzi grafik i swoje rozliczenia.`
+              : state === "invited"
+                ? `Zaproszenie wysłane${account?.invited_at ? ` ${when(account.invited_at)}` : ""}. Czeka, aż kierowca kliknie link i ustawi hasło.`
+                : "Kierowca nie ma jeszcze konta. Wyślij zaproszenie e-mailem albo skopiuj link i wyślij go SMS-em. Po kliknięciu kierowca ustawi hasło."}
+        </span>
+      </div>
+      {enabled && state !== "active" ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="primary" onClick={() => onInvite("email")} disabled={busy !== null}>
+            {busy === "email" ? <Spinner /> : <EnvelopeSimple size={15} />}
+            {state === "invited" ? "Wyślij e-mail ponownie" : "Wyślij e-mailem"}
+          </Button>
+          <Button size="sm" onClick={() => onInvite("link")} disabled={busy !== null}>
+            {busy === "link" ? <Spinner /> : <LinkSimple size={15} />}
+            Skopiuj link zaproszenia
+          </Button>
+        </div>
+      ) : null}
+      {link ? (
+        <div className="enter flex flex-col gap-1.5">
+          <input
+            readOnly
+            value={link}
+            onFocus={(e) => e.currentTarget.select()}
+            aria-label="Link zaproszenia"
+            className="h-9 w-full rounded-control border border-line-strong bg-surface px-2.5 font-mono text-[0.75rem] text-ink-2 outline-none focus:border-green"
+          />
+          <span className="text-[0.75rem] leading-snug text-ink-3">
+            Wyślij kierowcy SMS-em albo WhatsAppem. Link działa jeden raz i przez ograniczony czas.
+          </span>
+        </div>
+      ) : null}
+    </div>
   );
 }
